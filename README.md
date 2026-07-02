@@ -10,10 +10,14 @@ alternative to Ionic AppFlow's Live Updates feature.
 
 ## Status
 
-Currently this repository is **scaffolding only** — a pnpm-workspaces monorepo
-with empty placeholder packages. App and server logic will be filled in by
-subsequent slices. See `issues/` for the implementation plan and `PRD.md` for the
-full product requirements.
+The **server** workspace (`packages/server`) is implemented: a Fastify +
+TypeScript app that serves `GET /api/updates/latest` from an on-disk
+`manifest.json` and serves payload zips from `packages/server/payloads/`.
+HTTP contract tests are in place. The **app** workspace
+(`packages/app`) is still a placeholder — the Ionic/Angular/Capacitor project
+and the inlined live-update plugin will be filled in by subsequent slices.
+See `issues/` for the implementation plan and `PRD.md` for the full product
+requirements.
 
 ## Monorepo layout
 
@@ -27,6 +31,10 @@ full product requirements.
 └── packages/
     ├── app/              # Ionic + Angular 22 + Capacitor (iOS only)
     └── server/          # Fastify + TypeScript manifest/payload server
+        ├── src/          #   buildServer() + manifest reader + CLI entry
+        ├── test/         #   Fastify `inject` contract tests
+        ├── manifest.json #   seed manifest (version 1)
+        └── payloads/     #   served at /payloads/*.zip (zips gitignored)
 ```
 
 ### The live-update plugin is inlined into the app package

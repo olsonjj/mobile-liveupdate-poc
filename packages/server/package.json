@@ -3,7 +3,23 @@
   "version": "0.0.0",
   "private": true,
   "description": "Fastify + TypeScript local server serving update manifests and payload zips (POC).",
+  "type": "module",
+  "main": "dist/index.js",
   "scripts": {
-    "dev": "echo \"TODO: scaffold Fastify + TypeScript server in a later slice\""
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fastify/static": "^8.0.4",
+    "fastify": "^5.3.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
   }
 }

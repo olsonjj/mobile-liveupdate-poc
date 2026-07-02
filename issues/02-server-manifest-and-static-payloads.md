@@ -16,13 +16,13 @@ Include HTTP contract tests using Fastify's `inject` pattern. Treat the server a
 
 ## Acceptance criteria
 
-- [ ] `GET /api/updates/latest` returns `200` with a body matching `{ version: number, url: string, createdAt: string }`
-- [ ] The returned `version` matches the version recorded in the on-disk `manifest.json`
-- [ ] Rewriting `manifest.json` on disk (simulating a manual publish) is reflected on the next request to the endpoint
-- [ ] Static zip files under `payloads/` are served with the correct content type and bytes when requested via the manifest `url`
-- [ ] Requesting a non-existent payload returns a `404`
-- [ ] Server runs over plain HTTP on localhost
-- [ ] Contract tests pass and cover all the above behaviors
+- [x] `GET /api/updates/latest` returns `200` with a body matching `{ version: number, url: string, createdAt: string }`
+- [x] The returned `version` matches the version recorded in the on-disk `manifest.json`
+- [x] Rewriting `manifest.json` on disk (simulating a manual publish) is reflected on the next request to the endpoint
+- [x] Static zip files under `payloads/` are served with the correct content type and bytes when requested via the manifest `url`
+- [x] Requesting a non-existent payload returns a `404`
+- [x] Server runs over plain HTTP on localhost
+- [x] Contract tests pass and cover all the above behaviors
 
 ## Blocked by
 
