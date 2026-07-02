@@ -1,0 +1,11 @@
+{
+  "name": "live-update-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Inlined Capacitor live-update plugin (native iOS Swift) for the roll-your-own live-updates POC. Not a published package — consumed locally by @ionic-update-poc/app via a file: dependency so `cap sync` discovers and registers the native plugin class.",
+  "capacitor": {
+    "ios": {
+      "src": "ios"
+    }
+  }
+}

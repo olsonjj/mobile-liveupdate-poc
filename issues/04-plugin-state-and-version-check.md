@@ -19,13 +19,13 @@ On a very first launch (no `state.json` yet), the plugin should initialize `stat
 
 ## Acceptance criteria
 
-- [ ] The plugin's TypeScript API and native Swift implementation exist inlined under `packages/app`
-- [ ] On first launch, `state.json` is created at `Library/Application Support/liveupdates/state.json` with `{ "current": null, "previous": null }`
-- [ ] The `current/` and `previous/` subdirectories exist under `Library/Application Support/liveupdates/`
-- [ ] On cold launch, the plugin fetches the manifest and compares `server.version` against `local.current` (or the app-bundle baseline when `current` is null)
-- [ ] The UI surfaces whether an update is available (e.g. "current: 1, server: 2, update available")
-- [ ] The check is non-blocking — the app shows its current bundle immediately
-- [ ] `state.json` is inspectable via `xcrun simctl get_app_container` and reflects the expected values
+- [x] The plugin's TypeScript API and native Swift implementation exist inlined under `packages/app`
+- [x] On first launch, `state.json` is created at `Library/Application Support/liveupdates/state.json` with `{ "current": null, "previous": null }`
+- [x] The `current/` and `previous/` subdirectories exist under `Library/Application Support/liveupdates/`
+- [x] On cold launch, the plugin fetches the manifest and compares `server.version` against `local.current` (or the app-bundle baseline when `current` is null)
+- [x] The UI surfaces whether an update is available (e.g. "current: 1, server: 2, update available")
+- [x] The check is non-blocking — the app shows its current bundle immediately
+- [x] `state.json` is inspectable via `xcrun simctl get_app_container` and reflects the expected values
 
 ## Blocked by
 

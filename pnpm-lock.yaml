@@ -43,6 +43,9 @@ importers:
       ionicons:
         specifier: ^8.0.0
         version: 8.0.13
+      live-update-plugin:
+        specifier: file:./live-update-plugin
+        version: file:packages/app/live-update-plugin
       rxjs:
         specifier: ~7.8.0
         version: 7.8.2
@@ -2603,6 +2606,9 @@ packages:
   listr2@10.2.1:
     resolution: {integrity: sha512-7I5knELsJKTUjXG+A6BkKAiGkW1i25fNa/xlUl9hFtk15WbE9jndA89xu5FzQKrY5llajE1hfZZFMILXkDHk/Q==}
     engines: {node: '>=22.13.0'}
+
+  live-update-plugin@file:packages/app/live-update-plugin:
+    resolution: {directory: packages/app/live-update-plugin, type: directory}
 
   lmdb@3.5.4:
     resolution: {integrity: sha512-9FKQA6G1MMtqNxfxvSBNXD/axeG2QRjYbNh0/ykRL5xYcRbCm2vXq7B9bhc7nSuKdHzr8/BHIwfPuYYH1UsXXw==}
@@ -5893,6 +5899,8 @@ snapshots:
       log-update: 6.1.0
       rfdc: 1.4.1
       wrap-ansi: 10.0.0
+
+  live-update-plugin@file:packages/app/live-update-plugin: {}
 
   lmdb@3.5.4:
     dependencies:

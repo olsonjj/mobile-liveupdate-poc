@@ -24,6 +24,7 @@
     "@capacitor/ios": "^8.0.0",
     "@ionic/angular": "^8.0.0",
     "ionicons": "^8.0.0",
+    "live-update-plugin": "file:./live-update-plugin",
     "rxjs": "~7.8.0",
     "tslib": "^2.3.0",
     "zone.js": "~0.15.0"

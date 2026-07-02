@@ -22,9 +22,17 @@ the build number and greeting from a `version.ts` constant, plus a disabled
 is added, `npx cap sync ios` succeeds, and the app launches in the iOS
 simulator showing "Build: 1 / Hello World".
 
-The inlined live-update plugin (state, version check, download/unzip/swap,
-WebView reload, manual rollback) is still TODO — see `issues/` for the
-implementation plan and `PRD.md` for the full product requirements.
+The inlined live-update plugin's **state + version-check** slice is implemented
+(issue 04): a TypeScript API (`src/plugins/live-update/`) backed by a native
+Swift `LiveUpdatePlugin` (`CAPPlugin` + `CAPBridgedPlugin`) shipped as a local
+Capacitor plugin package (`packages/app/live-update-plugin/`, consumed via a
+`file:` dependency — not a separate pnpm workspace package, per PRD user story
+4). On cold launch the app calls `ensureStorage()` → `getState()` →
+`checkForUpdate()` non-blocking, surfacing "current: N, server: M, update
+available: yes/no" in the UI. The on-device layout `Library/Application
+Support/liveupdates/{current,previous,state.json}` is created on first launch
+and is inspectable via `xcrun simctl get_app_container`. Download/unzip/swap/
+WebView-reload/manual-rollback arrive in later issues (05–10).
 
 ## Monorepo layout
 
@@ -37,7 +45,8 @@ implementation plan and `PRD.md` for the full product requirements.
 ├── issues/               # slice-by-slice implementation plan
 └── packages/
     ├── app/              # Ionic + Angular 22 + Capacitor (iOS only)
-    │   ├── src/          #   version.ts + Hello World UI (Roll Back disabled)
+    │   ├── src/          #   version.ts + Hello World UI + plugins/live-update/ (TS API)
+    │   ├── live-update-plugin/  # inlined native plugin (local SPM package, file: dep)
     │   ├── ios/          #   native Xcode project (iOS only, no Android)
     │   └── capacitor.config.ts
     └── server/          # Fastify + TypeScript manifest/payload server
@@ -50,11 +59,20 @@ implementation plan and `PRD.md` for the full product requirements.
 ### The live-update plugin is inlined into the app package
 
 Per an explicit decision in `PRD.md` (user story 4), the Capacitor live-update
-plugin is **not** a standalone workspace package. It lives as a subfolder inside
-`packages/app` — its TypeScript API alongside the Angular source and its native
-Swift code under the iOS project. This avoids the packaging overhead of a
-standalone plugin package for a throwaway POC while keeping the two workspace
-concerns (app vs. server) clearly separated.
+plugin is **not** a standalone pnpm workspace package. It lives as a subfolder
+inside `packages/app` — its TypeScript API (`src/plugins/live-update/`) sits
+alongside the Angular source, and its native Swift code ships as a *local
+Capacitor plugin package* at `packages/app/live-update-plugin/` (with its own
+`Package.swift`), consumed by the app via a `file:` dependency. This is the
+canonical way Capacitor's `cap sync` discovers and registers a local native
+plugin class (it scans the package's Swift sources for `@objc(...)` and adds
+the class to `packageClassList`, then links the SPM product into `CapApp-SPM`).
+
+This keeps the plugin inlined within `packages/app` (no published package, no
+separate workspace entry) while still using Capacitor's standard registration
+path — the only deviation from the PRD's literal "under the iOS project"
+wording, made necessary because Capacitor has no in-place registration hook for
+arbitrary Swift files added directly to `CapApp-SPM`'s sources.
 
 ## Prerequisites
 
