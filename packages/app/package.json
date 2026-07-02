@@ -13,13 +13,11 @@
     "cap:run": "cap run ios"
   },
   "dependencies": {
-    "@angular/animations": "^22.0.0",
     "@angular/common": "^22.0.0",
     "@angular/compiler": "^22.0.0",
     "@angular/core": "^22.0.0",
     "@angular/forms": "^22.0.0",
     "@angular/platform-browser": "^22.0.0",
-    "@angular/platform-browser-dynamic": "^22.0.0",
     "@angular/router": "^22.0.0",
     "@capacitor/app": "^8.0.0",
     "@capacitor/core": "^8.0.0",
@@ -31,7 +29,7 @@
     "zone.js": "~0.15.0"
   },
   "devDependencies": {
-    "@angular-devkit/build-angular": "^22.0.0",
+    "@angular/build": "^22.0.0",
     "@angular/cli": "^22.0.0",
     "@angular/compiler-cli": "^22.0.0",
     "@capacitor/cli": "^8.0.0",

@@ -20,6 +20,9 @@
       "esbuild",
       "lmdb",
       "msgpackr-extract"
+    ],
+    "ignoredOptionalDependencies": [
+      "@angular/animations"
     ]
   }
 }
