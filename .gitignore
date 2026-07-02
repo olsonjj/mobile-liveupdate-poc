@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+www/
+build/
+
+# Capacitor / iOS
+packages/app/ios/App/App/output/
+packages/app/ios/App/build/
+packages/app/ios/App/Pods/
+packages/app/ios/App/App/capacitor.config.json
+
+# Server payloads (generated zips, kept local)
+packages/server/payloads/*.zip
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/

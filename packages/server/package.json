@@ -1,0 +1,9 @@
+{
+  "name": "@ionic-update-poc/server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Fastify + TypeScript local server serving update manifests and payload zips (POC).",
+  "scripts": {
+    "dev": "echo \"TODO: scaffold Fastify + TypeScript server in a later slice\""
+  }
+}

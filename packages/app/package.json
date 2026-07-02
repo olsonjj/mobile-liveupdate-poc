@@ -1,0 +1,9 @@
+{
+  "name": "@ionic-update-poc/app",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Ionic + Angular 22 + Capacitor app with an inlined live-update plugin (POC).",
+  "scripts": {
+    "dev": "echo \"TODO: scaffold Ionic/Angular/Capacitor project in a later slice\""
+  }
+}
