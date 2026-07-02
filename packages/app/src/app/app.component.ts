@@ -1,7 +1,10 @@
-import { ChangeDetectionStrategy, Component, OnInit, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { App as CapacitorApp, AppState } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
 import {
   IonApp,
+  IonBadge,
   IonButton,
   IonContent,
   IonHeader,
@@ -16,7 +19,16 @@ import { GREETING, VERSION } from '../version';
 @Component({
   selector: 'app-root',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, IonApp, IonButton, IonContent, IonHeader, IonTitle, IonToolbar],
+  imports: [
+    FormsModule,
+    IonApp,
+    IonBadge,
+    IonButton,
+    IonContent,
+    IonHeader,
+    IonTitle,
+    IonToolbar,
+  ],
   template: `
     <ion-app>
       <ion-header>
@@ -30,6 +42,13 @@ import { GREETING, VERSION } from '../version';
         <ion-button (click)="onRollBack()" [disabled]="!canRollBack()">
           Roll Back
         </ion-button>
+        @if (updateAvailable()) {
+          <div class="update-badge">
+            <ion-badge color="warning">
+              Update available — build {{ serverVersion() }}
+            </ion-badge>
+          </div>
+        }
         @if (status()) {
           <div class="status-line">{{ status() }}</div>
         }
@@ -51,6 +70,12 @@ import { GREETING, VERSION } from '../version';
         font-size: 1.25rem;
         margin-bottom: 1.5rem;
       }
+      .update-badge {
+        margin-top: 1rem;
+      }
+      .update-badge ion-badge {
+        font-size: 0.9rem;
+      }
       .status-line {
         margin-top: 1.5rem;
         font-size: 0.95rem;
@@ -61,18 +86,31 @@ import { GREETING, VERSION } from '../version';
     `,
   ],
 })
-export class AppComponent implements OnInit {
+export class AppComponent implements OnInit, OnDestroy {
   /** Current build number, read from the bundled version constant. */
   readonly version = VERSION;
   /** Greeting string, read from the bundled version constant. */
   readonly greeting = GREETING;
 
   /**
-   * Live-update status line surfaced from the plugin (issue 04): the cold-launch
-   * version check resolves here, non-blocking. Empty until the check produces a
-   * result or error.
+   * Developer-facing debug status line (issue 04). Populated on cold launch
+   * and on each foreground resume check with a short note. Non-blocking: the
+   * UI above renders from the bundled version constant first; this resolves
+   * later.
    */
   readonly status = signal('');
+
+  /**
+   * User-facing "update available" indicator (issue 05). `true` only when the
+   * most recent check found `serverVersion > currentVersion`. Driven by both
+   * the cold-launch check and the silent foreground-resume check, so bumping
+   * the server version and resuming the app surfaces the badge without a
+   * download or overlay.
+   */
+  readonly updateAvailable = signal(false);
+
+  /** Server build number from the most recent check (for the badge label). */
+  readonly serverVersion = signal<number | null>(null);
 
   /**
    * Whether a previous bundle exists to roll back to. Driven by `state.json`
@@ -81,30 +119,84 @@ export class AppComponent implements OnInit {
    */
   readonly canRollBack = signal(false);
 
+  /** Handle for the foreground/resume listener (issue 05), cleaned up on destroy. */
+  private resumeListener?: { remove: () => Promise<void> };
+
   async ngOnInit(): Promise<void> {
-    // Non-blocking cold-launch check (PRD user story 12 + 14): the UI above is
-    // already rendered from the bundled version constant; this promise resolves
-    // later and updates the status line + rollback availability via signals.
-    this.status.set('Checking for updates…');
-    try {
-      await LiveUpdate.ensureStorage();
-      const state = await LiveUpdate.getState();
-      this.canRollBack.set(state.previous !== null);
-      const result = await LiveUpdate.checkForUpdate({
-        serverUrl: LIVE_UPDATE_SERVER_URL,
-        baselineVersion: VERSION,
-      });
-      this.status.set(
-        `current: ${result.currentVersion}, server: ${result.serverVersion}, ` +
-          `update available: ${result.updateAvailable ? 'yes' : 'no'}`,
-      );
-    } catch (err) {
-      this.status.set(`update check failed: ${stringifyError(err)}`);
+    // Cold-launch check (PRD user story 12 + 14): non-blocking; the UI is
+    // already rendered from the bundled version constant.
+    await this.runCheck('cold');
+
+    // Foreground-resume trigger (PRD user story 13 + 14, issue 05): when the
+    // app returns to the foreground, re-run the version check silently. The
+    // native plugin layer is only present on iOS; on `ng serve` the listener
+    // registration is skipped so web dev never hits "not implemented".
+    if (Capacitor.isNativePlatform()) {
+      try {
+        this.resumeListener = await CapacitorApp.addListener(
+          'appStateChange',
+          (state: AppState) => {
+            if (state.isActive) {
+              void this.runCheck('resume');
+            }
+          },
+        );
+      } catch (err) {
+        this.status.set(
+          `${this.status()} | resume listener failed: ${stringifyError(err)}`,
+        );
+      }
     }
+  }
+
+  ngOnDestroy(): void {
+    void this.resumeListener?.remove();
   }
 
   onRollBack(): void {
     // Implemented in a later slice (issue 09).
+  }
+
+  // MARK: - Version check
+
+  /**
+   * Run the version check against the server (issue 04 + issue 05).
+   *
+   * Non-blocking and silent: this only reads `state.json` + fetches the
+   * manifest and updates signals — no overlay, no download, no swap (those
+   * arrive in later issues). On cold launch it also writes the verbose debug
+   * status line; on resume it just refreshes the indicator + a short note.
+   */
+  private async runCheck(source: 'cold' | 'resume'): Promise<void> {
+    if (source === 'cold') {
+      this.status.set('Checking for updates…');
+    }
+    try {
+      // ensureStorage/getState are cheap local file ops; safe to await on
+      // resume without blocking the WebView's initial paint (which already
+      // happened before the resume event fires).
+      await LiveUpdate.ensureStorage();
+      const state = await LiveUpdate.getState();
+      this.canRollBack.set(state.previous !== null);
+
+      const result = await LiveUpdate.checkForUpdate({
+        serverUrl: LIVE_UPDATE_SERVER_URL,
+        baselineVersion: VERSION,
+      });
+
+      this.serverVersion.set(result.serverVersion);
+      this.updateAvailable.set(result.updateAvailable);
+
+      const note =
+        `current: ${result.currentVersion}, server: ${result.serverVersion}, ` +
+        `update available: ${result.updateAvailable ? 'yes' : 'no'}`;
+      this.status.set(source === 'cold' ? note : `[resume] ${note}`);
+    } catch (err) {
+      const msg = `${source} check failed: ${stringifyError(err)}`;
+      this.status.set(source === 'cold' ? msg : `[resume] ${msg}`);
+      // A failed check must never surface a stale "update available" badge.
+      this.updateAvailable.set(false);
+    }
   }
 }
 

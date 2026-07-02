@@ -32,7 +32,16 @@ Capacitor plugin package (`packages/app/live-update-plugin/`, consumed via a
 available: yes/no" in the UI. The on-device layout `Library/Application
 Support/liveupdates/{current,previous,state.json}` is created on first launch
 and is inspectable via `xcrun simctl get_app_container`. Download/unzip/swap/
-WebView-reload/manual-rollback arrive in later issues (05–10).
+WebView-reload/manual-rollback arrive in later issues (06–10).
+
+The **foreground-resume trigger** slice is implemented (issue 05): on iOS the
+app subscribes to `@capacitor/app`'s `appStateChange` event and, when the app
+returns to the foreground (`isActive === true`), re-runs `checkForUpdate()`
+silently — no overlay, no download (those arrive in 06–08). The result drives
+a dedicated user-facing "Update available — build M" badge (`ion-badge`) that
+appears only when `server.version > current`, and is hidden when equal/lower
+or when a check fails. The cold-launch check reuses the same code path and
+writes the verbose debug status line.
 
 ## Monorepo layout
 

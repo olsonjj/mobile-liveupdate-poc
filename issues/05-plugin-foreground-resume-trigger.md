@@ -8,11 +8,11 @@ When the server version is greater than the local current version, the UI should
 
 ## Acceptance criteria
 
-- [ ] The version check fires on app foreground/resume events, not only on cold launch
-- [ ] The foreground check is non-blocking and silent (no overlay, no download)
-- [ ] When the server version is greater than local, the UI shows an "update available" indicator
-- [ ] When the server version is equal or lower, no indicator is shown
-- [ ] Demoable: bump the server version, background the app, resume it, and observe the "update available" indicator appear without any download occurring
+- [x] The version check fires on app foreground/resume events, not only on cold launch
+- [x] The foreground check is non-blocking and silent (no overlay, no download)
+- [x] When the server version is greater than local, the UI shows an "update available" indicator
+- [x] When the server version is equal or lower, no indicator is shown
+- [x] Demoable: bump the server version, background the app, resume it, and observe the "update available" indicator appear without any download occurring
 
 ## Blocked by
 
