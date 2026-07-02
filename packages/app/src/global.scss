@@ -1,0 +1,23 @@
+/*
+ * App Global Styles
+ * ----------------------------------------------------------------------------
+ * Only styles that need global scope belong here.
+ */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+ion-content {
+  --background: #ffffff;
+}
+
+/* Dark mode */
+@media (prefers-color-scheme: dark) {
+  ion-content {
+    --background: #1a1a1a;
+  }
+}

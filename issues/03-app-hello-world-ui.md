@@ -14,13 +14,13 @@ This slice establishes the base app that subsequent update slices will mutate.
 
 ## Acceptance criteria
 
-- [ ] `packages/app` is a working Ionic + Angular 22 + Capacitor project
-- [ ] iOS platform is added; no Android platform present
-- [ ] A `version.ts` constant exposes an integer build number and a greeting string
-- [ ] The UI displays the build number and the greeting
-- [ ] The UI displays a "Roll Back" button, disabled
-- [ ] `npx cap sync ios` succeeds
-- [ ] The app launches in the iOS simulator and visibly shows "Build: 1 / Hello World" (or equivalent initial values)
+- [x] `packages/app` is a working Ionic + Angular 22 + Capacitor project
+- [x] iOS platform is added; no Android platform present
+- [x] A `version.ts` constant exposes an integer build number and a greeting string
+- [x] The UI displays the build number and the greeting
+- [x] The UI displays a "Roll Back" button, disabled
+- [x] `npx cap sync ios` succeeds
+- [x] The app launches in the iOS simulator and visibly shows "Build: 1 / Hello World" (or equivalent initial values)
 
 ## Blocked by
 

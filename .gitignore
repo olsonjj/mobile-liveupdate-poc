@@ -6,6 +6,12 @@ dist/
 www/
 build/
 
+# Angular CLI cache
+.angular/
+
+# Screenshots (throwaway simulator verification artifacts)
+screenshots/
+
 # Capacitor / iOS
 packages/app/ios/App/App/output/
 packages/app/ios/App/build/

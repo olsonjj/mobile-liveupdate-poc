@@ -13,11 +13,18 @@ alternative to Ionic AppFlow's Live Updates feature.
 The **server** workspace (`packages/server`) is implemented: a Fastify +
 TypeScript app that serves `GET /api/updates/latest` from an on-disk
 `manifest.json` and serves payload zips from `packages/server/payloads/`.
-HTTP contract tests are in place. The **app** workspace
-(`packages/app`) is still a placeholder — the Ionic/Angular/Capacitor project
-and the inlined live-update plugin will be filled in by subsequent slices.
-See `issues/` for the implementation plan and `PRD.md` for the full product
-requirements.
+HTTP contract tests are in place.
+
+The **app** workspace (`packages/app`) is scaffolded as an Ionic + Angular 22 +
+Capacitor (iOS only) project. It ships a minimal Hello World UI that renders
+the build number and greeting from a `version.ts` constant, plus a disabled
+"Roll Back" button (no previous bundle to roll back to yet). The iOS platform
+is added, `npx cap sync ios` succeeds, and the app launches in the iOS
+simulator showing "Build: 1 / Hello World".
+
+The inlined live-update plugin (state, version check, download/unzip/swap,
+WebView reload, manual rollback) is still TODO — see `issues/` for the
+implementation plan and `PRD.md` for the full product requirements.
 
 ## Monorepo layout
 
@@ -30,6 +37,9 @@ requirements.
 ├── issues/               # slice-by-slice implementation plan
 └── packages/
     ├── app/              # Ionic + Angular 22 + Capacitor (iOS only)
+    │   ├── src/          #   version.ts + Hello World UI (Roll Back disabled)
+    │   ├── ios/          #   native Xcode project (iOS only, no Android)
+    │   └── capacitor.config.ts
     └── server/          # Fastify + TypeScript manifest/payload server
         ├── src/          #   buildServer() + manifest reader + CLI entry
         ├── test/         #   Fastify `inject` contract tests
