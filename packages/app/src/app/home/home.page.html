@@ -15,6 +15,22 @@
     <p class="build-label">Build: {{ buildNumber }}</p>
     <p class="greeting">{{ greeting }}</p>
 
+    <!-- Version check info -->
+    <div id="update-info" *ngIf="checkComplete; else checking">
+      <p class="version-line">Local: {{ localVersion ?? '(none)' }}</p>
+      <p class="version-line">Server: {{ serverVersion ?? '(unreachable)' }}</p>
+      <p
+        class="update-status"
+        [class.available]="updateAvailable"
+        [class.unavailable]="!updateAvailable"
+      >
+        {{ updateAvailable ? '✓ Update available' : '✗ Up to date' }}
+      </p>
+    </div>
+    <ng-template #checking>
+      <p class="version-line checking">Checking for updates…</p>
+    </ng-template>
+
     <ion-button
       expand="block"
       color="medium"

@@ -1,4 +1,5 @@
-import { Component } from '@angular/core';
+import { Component, OnInit } from '@angular/core';
+import { UpdateService } from './live-update/update.service';
 
 @Component({
   selector: 'app-root',
@@ -6,6 +7,14 @@ import { Component } from '@angular/core';
   styleUrls: ['app.component.scss'],
   standalone: false,
 })
-export class AppComponent {
-  constructor() {}
+export class AppComponent implements OnInit {
+  constructor(private readonly updateService: UpdateService) {}
+
+  ngOnInit(): void {
+    // Non-blocking initialization — the app shows its current bundle
+    // immediately and the update check runs in the background.
+    this.updateService.initialize().catch((err) => {
+      console.warn('[AppComponent] UpdateService initialization error:', err);
+    });
+  }
 }

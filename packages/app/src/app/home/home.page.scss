@@ -22,6 +22,37 @@
   margin: 0 0 32px;
 }
 
+#update-info {
+  margin-bottom: 24px;
+}
+
+.version-line {
+  font-size: 14px;
+  line-height: 20px;
+  color: #8c8c8c;
+  margin: 0;
+}
+
+.version-line.checking {
+  font-style: italic;
+  margin-bottom: 24px;
+}
+
+.update-status {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 22px;
+  margin: 4px 0 0;
+}
+
+.update-status.available {
+  color: #2dd36b;
+}
+
+.update-status.unavailable {
+  color: #8c8c8c;
+}
+
 #container ion-button {
   max-width: 240px;
   margin: 0 auto;
