@@ -34,6 +34,12 @@ export class HomePage implements OnInit, OnDestroy {
   /** Whether the initial check has completed (for display purposes). */
   checkComplete = false;
 
+  /** Whether an update download/unzip is in progress (shows overlay). */
+  isUpdating = false;
+
+  /** Tracking whether the auto-update has already been triggered. */
+  private updateInProgress = false;
+
   private readonly subs: Subscription[] = [];
 
   constructor(private readonly updateService: UpdateService) {}
@@ -46,7 +52,7 @@ export class HomePage implements OnInit, OnDestroy {
       }),
     );
 
-    // Subscribe to check results
+    // Subscribe to check results and auto-trigger update when available
     this.subs.push(
       this.updateService.checkResult$.subscribe(
         (result: CheckResult | null) => {
@@ -55,9 +61,31 @@ export class HomePage implements OnInit, OnDestroy {
             this.serverVersion = result.serverVersion;
             this.updateAvailable = result.updateAvailable;
             this.checkComplete = true;
+
+            // Auto-trigger download when update is available and not already in progress
+            if (
+              result.updateAvailable &&
+              result.zipUrl &&
+              result.serverVersion != null &&
+              !this.updateInProgress
+            ) {
+              this.updateInProgress = true;
+              this.updateService
+                .beginUpdate(result.zipUrl, result.serverVersion)
+                .catch((err) => {
+                  console.warn('[HomePage] beginUpdate failed:', err);
+                  this.updateInProgress = false;
+                });
+            }
           }
         },
       ),
+    );
+    // Subscribe to updating state for overlay
+    this.subs.push(
+      this.updateService.isUpdating$.subscribe((updating: boolean) => {
+        this.isUpdating = updating;
+      }),
     );
   }
 

@@ -57,3 +57,36 @@
   max-width: 240px;
   margin: 0 auto;
 }
+
+/* ── "Updating…" overlay ──────────────────────────────────────── */
+
+#updating-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+}
+
+#updating-overlay-box {
+  text-align: center;
+  padding: 32px 40px;
+  background: #1c1c1e;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+#updating-overlay-box ion-spinner {
+  width: 36px;
+  height: 36px;
+  color: #ffffff;
+}
+
+#updating-overlay-text {
+  color: #ffffff;
+  font-size: 16px;
+  font-weight: 500;
+  margin: 12px 0 0;
+}

@@ -11,6 +11,14 @@
     </ion-toolbar>
   </ion-header>
 
+  <!-- "Updating…" overlay -->
+  <div id="updating-overlay" *ngIf="isUpdating">
+    <div id="updating-overlay-box">
+      <ion-spinner name="crescent"></ion-spinner>
+      <p id="updating-overlay-text">Updating&hellip;</p>
+    </div>
+  </div>
+
   <div id="container">
     <p class="build-label">Build: {{ buildNumber }}</p>
     <p class="greeting">{{ greeting }}</p>

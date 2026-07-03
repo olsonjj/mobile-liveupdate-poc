@@ -19,12 +19,24 @@ export interface CheckResult {
   serverVersion: number | null;
   /** True when serverVersion > localVersion. */
   updateAvailable: boolean;
+  /** The URL of the zip payload from the manifest (set when update is available). */
+  zipUrl: string | null;
 }
 
 /** Result of getState(). */
 export interface GetStateResult {
   current: number | null;
   previous: number | null;
+}
+
+/** Result of a download-and-stage call. */
+export interface DownloadAndStageResult {
+  /** True if the download, unzip, and validation succeeded. */
+  success: boolean;
+  /** The version number of the staged bundle (only on success). */
+  version: number | null;
+  /** Human-readable error message (only on failure). */
+  error: string | null;
 }
 
 /** Interface exposed by the LiveUpdate Capacitor plugin. */
@@ -58,4 +70,21 @@ export interface LiveUpdatePluginPlugin {
     serverUrl: string;
     bundledBuildNumber: number;
   }): Promise<CheckResult>;
+
+  /**
+   * Download a payload zip from the given URL, unzip it into a staging
+   * directory under Library/Application Support/liveupdates/staging/,
+   * and validate that the unzipped bundle contains an index.html at its
+   * root.
+   *
+   * On failure the staging directory and any temporary files are cleaned
+   * up and the active bundle is left completely untouched.
+   *
+   * @param zipUrl  Full URL to the payload zip (from the server manifest)
+   * @param version  The version number of the payload (for staging dir naming)
+   */
+  downloadAndStageUpdate(options: {
+    zipUrl: string;
+    version: number;
+  }): Promise<DownloadAndStageResult>;
 }

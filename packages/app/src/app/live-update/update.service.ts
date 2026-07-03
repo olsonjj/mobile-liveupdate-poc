@@ -3,7 +3,7 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import LiveUpdate from './plugin';
-import type { CheckResult, GetStateResult } from './types';
+import type { CheckResult, DownloadAndStageResult, GetStateResult } from './types';
 import { BUILD } from '../version';
 import { environment } from '../../environments/environment';
 
@@ -26,6 +26,13 @@ export class UpdateService implements OnDestroy {
   /** Observable emitting the latest state.json contents, or null before loaded. */
   readonly state$: Observable<GetStateResult | null> =
     this.state.asObservable();
+
+  /** Whether an update download/unzip/stage is currently in progress. */
+  private readonly isUpdating = new BehaviorSubject<boolean>(false);
+
+  /** Observable emitting whether an update download is in progress (for overlay). */
+  readonly isUpdating$: Observable<boolean> =
+    this.isUpdating.asObservable();
 
   /** Server base URL, from environment config. */
   private readonly serverUrl = environment.serverUrl;
@@ -58,6 +65,47 @@ export class UpdateService implements OnDestroy {
     this.performCheck().catch((err) =>
       console.warn('[LiveUpdate] initial check failed:', err),
     );
+  }
+
+  /**
+   * Begin the update process: show overlay, download zip, unzip, and
+   * stage the new bundle. Called automatically when an update is available.
+   *
+   * The overlay stays visible after a successful stage so that the
+   * atomic swap (issue 07) can follow without a visual gap.
+   * On failure the overlay is dismissed and the active bundle is untouched.
+   */
+  async beginUpdate(zipUrl: string, version: number): Promise<DownloadAndStageResult> {
+    this.ngZone.run(() => this.isUpdating.next(true));
+
+    try {
+      const result = await LiveUpdate.downloadAndStageUpdate({
+        zipUrl,
+        version,
+      });
+
+      if (!result.success) {
+        // Dismiss overlay on failure
+        this.ngZone.run(() => this.isUpdating.next(false));
+        console.warn('[LiveUpdate] Stage failed:', result.error);
+      }
+      // On success, overlay stays visible — swap step (issue 07)
+      // will dismiss it.
+
+      return result;
+    } catch (err) {
+      this.ngZone.run(() => this.isUpdating.next(false));
+      console.warn('[LiveUpdate] Stage threw:', err);
+      return { success: false, version: null, error: String(err) };
+    }
+  }
+
+  /**
+   * Dismiss the updating overlay. Called after a successful swap or
+   * rollback (issues 07 / 09).
+   */
+  dismissOverlay(): void {
+    this.ngZone.run(() => this.isUpdating.next(false));
   }
 
   /**
