@@ -3,7 +3,7 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import LiveUpdate from './plugin';
-import type { CheckResult, DownloadAndStageResult, GetStateResult } from './types';
+import type { CheckResult, DownloadAndStageResult, GetStateResult, SwapResult } from './types';
 import { BUILD } from '../version';
 import { environment } from '../../environments/environment';
 
@@ -68,36 +68,59 @@ export class UpdateService implements OnDestroy {
   }
 
   /**
-   * Begin the update process: show overlay, download zip, unzip, and
-   * stage the new bundle. Called automatically when an update is available.
+   * Begin the update process: show overlay, download zip, unzip,
+   * stage, and atomically swap the staged bundle into `current/`.
+   * Called automatically when an update is available.
    *
-   * The overlay stays visible after a successful stage so that the
-   * atomic swap (issue 07) can follow without a visual gap.
-   * On failure the overlay is dismissed and the active bundle is untouched.
+   * On failure at any stage the overlay is dismissed and the active
+   * bundle is left untouched. On success the overlay is dismissed
+   * (WebView reload comes in issue 08).
    */
-  async beginUpdate(zipUrl: string, version: number): Promise<DownloadAndStageResult> {
+  async beginUpdate(zipUrl: string, version: number): Promise<SwapResult> {
     this.ngZone.run(() => this.isUpdating.next(true));
 
     try {
-      const result = await LiveUpdate.downloadAndStageUpdate({
+      // Stage: download + unzip + validate
+      const stageResult = await LiveUpdate.downloadAndStageUpdate({
         zipUrl,
         version,
       });
 
-      if (!result.success) {
-        // Dismiss overlay on failure
+      if (!stageResult.success) {
         this.ngZone.run(() => this.isUpdating.next(false));
-        console.warn('[LiveUpdate] Stage failed:', result.error);
+        console.warn('[LiveUpdate] Stage failed:', stageResult.error);
+        return { success: false, version: null, error: stageResult.error };
       }
-      // On success, overlay stays visible — swap step (issue 07)
-      // will dismiss it.
 
-      return result;
+      // Swap: move current→previous, staged→current, update state.json
+      const swapResult = await this.swapToStagedUpdate(version);
+
+      if (!swapResult.success) {
+        this.ngZone.run(() => this.isUpdating.next(false));
+        console.warn('[LiveUpdate] Swap failed:', swapResult.error);
+        return swapResult;
+      }
+
+      // Refresh in-memory state
+      await this.refreshState();
+
+      // Dismiss overlay (reload comes in issue 08)
+      this.ngZone.run(() => this.isUpdating.next(false));
+
+      console.log('[LiveUpdate] Update complete for v%d', version);
+      return swapResult;
     } catch (err) {
       this.ngZone.run(() => this.isUpdating.next(false));
-      console.warn('[LiveUpdate] Stage threw:', err);
+      console.warn('[LiveUpdate] beginUpdate threw:', err);
       return { success: false, version: null, error: String(err) };
     }
+  }
+
+  /**
+   * Atomically swap the staged bundle into `current/` and update state.json.
+   */
+  async swapToStagedUpdate(version: number): Promise<SwapResult> {
+    return LiveUpdate.swapToStagedUpdate({ version });
   }
 
   /**

@@ -2,7 +2,7 @@ import { Component, OnInit, OnDestroy } from '@angular/core';
 import { Subscription } from 'rxjs';
 import { BUILD } from '../version';
 import { UpdateService } from '../live-update/update.service';
-import type { CheckResult, GetStateResult } from '../live-update/types';
+import type { CheckResult, GetStateResult, SwapResult } from '../live-update/types';
 
 @Component({
   selector: 'app-home',
@@ -62,7 +62,7 @@ export class HomePage implements OnInit, OnDestroy {
             this.updateAvailable = result.updateAvailable;
             this.checkComplete = true;
 
-            // Auto-trigger download when update is available and not already in progress
+            // Auto-trigger download + swap when update is available and not already in progress
             if (
               result.updateAvailable &&
               result.zipUrl &&
@@ -72,6 +72,12 @@ export class HomePage implements OnInit, OnDestroy {
               this.updateInProgress = true;
               this.updateService
                 .beginUpdate(result.zipUrl, result.serverVersion)
+                .then((swapResult: SwapResult) => {
+                  if (swapResult.success) {
+                    console.log('[HomePage] Update swapped successfully for v%d', swapResult.version);
+                  }
+                  this.updateInProgress = false;
+                })
                 .catch((err) => {
                   console.warn('[HomePage] beginUpdate failed:', err);
                   this.updateInProgress = false;

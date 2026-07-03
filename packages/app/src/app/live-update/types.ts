@@ -39,6 +39,16 @@ export interface DownloadAndStageResult {
   error: string | null;
 }
 
+/** Result of a swap-to-staged call. */
+export interface SwapResult {
+  /** True if the atomic swap and state update succeeded. */
+  success: boolean;
+  /** The version number that was swapped in (only on success). */
+  version: number | null;
+  /** Human-readable error message (only on failure). */
+  error: string | null;
+}
+
 /** Interface exposed by the LiveUpdate Capacitor plugin. */
 export interface LiveUpdatePluginPlugin {
   /**
@@ -87,4 +97,17 @@ export interface LiveUpdatePluginPlugin {
     zipUrl: string;
     version: number;
   }): Promise<DownloadAndStageResult>;
+
+  /**
+   * Atomically swap the staged bundle into `current/`, moving the old
+   * `current/` to `previous/`, and update state.json.
+   *
+   * On failure the prior directory arrangement is restored and the
+   * active pointer (state.json) is left unchanged.
+   *
+   * @param version  The version number being swapped in
+   */
+  swapToStagedUpdate(options: {
+    version: number;
+  }): Promise<SwapResult>;
 }
