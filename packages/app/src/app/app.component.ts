@@ -119,6 +119,13 @@ export class AppComponent implements OnInit, OnDestroy {
    */
   readonly canRollBack = signal(false);
 
+  /**
+   * Re-entrancy guard for {@link prepareUpdate} (issue 06). `true` while a
+   * download/unzip/validate cycle is in flight so a rapid foreground→resume
+   * can't kick off a second concurrent staging pass over the first.
+   */
+  private readonly preparing = signal(false);
+
   /** Handle for the foreground/resume listener (issue 05), cleaned up on destroy. */
   private resumeListener?: { remove: () => Promise<void> };
 
@@ -157,6 +164,38 @@ export class AppComponent implements OnInit, OnDestroy {
     // Implemented in a later slice (issue 09).
   }
 
+  // MARK: - Download / unzip / validate to staging (issue 06)
+
+  /**
+   * Drive the native `prepareUpdate`: download the payload zip, unzip it into
+   * `staging/www/`, and validate `index.html`. The native layer owns the
+   * "Updating…" overlay (shown on entry, dismissed on failure, left visible on
+   * success for the swap slice). Non-blocking: the WebView already rendered
+   * its current bundle before this runs. Guarded by {@link preparing} so a
+   * foreground-resume can't double-trigger over an in-flight cold-launch
+   * staging pass.
+   */
+  private async prepareUpdate(url: string): Promise<void> {
+    if (this.preparing()) {
+      return;
+    }
+    this.preparing.set(true);
+    try {
+      const result = await LiveUpdate.prepareUpdate({ url });
+      // On success the native overlay stays up; the atomic-swap slice (issue
+      // 07) will dismiss it after reloading. Surface the staged path for
+      // debugging (visible only once a later slice dismisses the overlay).
+      this.status.set(`staged bundle at ${result.stagingPath} — awaiting swap`);
+    } catch (err) {
+      // prepareUpdate already cleaned up staging + dismissed the overlay on
+      // the native side; just surface the failure.
+      this.updateAvailable.set(false);
+      this.status.set(`prepareUpdate failed: ${stringifyError(err)}`);
+    } finally {
+      this.preparing.set(false);
+    }
+  }
+
   // MARK: - Version check
 
   /**
@@ -191,6 +230,15 @@ export class AppComponent implements OnInit, OnDestroy {
         `current: ${result.currentVersion}, server: ${result.serverVersion}, ` +
         `update available: ${result.updateAvailable ? 'yes' : 'no'}`;
       this.status.set(source === 'cold' ? note : `[resume] ${note}`);
+
+      // Issue 06: when an update is available, kick off download/unzip/
+      // validate-to-staging. The native plugin shows an "Updating…" overlay
+      // over the WebView for the duration; on success the overlay stays
+      // visible (handed off to the atomic-swap slice, issue 07), on failure
+      // it is dismissed and nothing is mutated.
+      if (result.updateAvailable) {
+        void this.prepareUpdate(result.url);
+      }
     } catch (err) {
       const msg = `${source} check failed: ${stringifyError(err)}`;
       this.status.set(source === 'cold' ? msg : `[resume] ${msg}`);

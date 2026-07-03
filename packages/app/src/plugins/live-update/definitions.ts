@@ -30,14 +30,43 @@ export interface CheckForUpdateResult {
   serverVersion: number;
   /** `true` iff `serverVersion > currentVersion`. */
   updateAvailable: boolean;
+  /**
+   * The payload zip URL from the manifest, forwarded so the JS layer can hand
+   * it straight to {@link LiveUpdatePlugin.prepareUpdate} without re-fetching
+   * the manifest. Empty string when the manifest lacked a `url`.
+   */
+  url: string;
+}
+
+/** Options for {@link LiveUpdatePlugin.prepareUpdate}. */
+export interface PrepareUpdateOptions {
+  /**
+   * Absolute URL of the payload zip to download — the `url` field of the
+   * server manifest (see {@link CheckForUpdateResult.url}).
+   */
+  url: string;
+}
+
+/** Result of {@link LiveUpdatePlugin.prepareUpdate}. */
+export interface PrepareUpdateResult {
+  /**
+   * Absolute on-device path to the staged bundle directory
+   * (`…/liveupdates/staging/www/`), for debugging via
+   * `xcrun simctl get_app_container`.
+   */
+  stagingPath: string;
 }
 
 /**
  * TypeScript contract for the inlined native `LiveUpdatePlugin` Swift class
- * (see `packages/app/ios/App/CapApp-SPM/Sources/CapApp-SPM/LiveUpdatePlugin.swift`).
+ * (see `packages/app/live-update-plugin/ios/Sources/LiveUpdatePlugin/LiveUpdatePlugin.swift`).
  *
- * This slice (issue 04) covers on-device state management + the version check
- * only; download/unzip/swap/reload/rollback methods arrive in later issues.
+ * Slices implemented so far:
+ *   - issue 04: on-device state (`ensureStorage`, `getState`) + version check
+ *     (`checkForUpdate`).
+ *   - issue 06: `prepareUpdate` — download/unzip/validate-to-staging with an
+ *     "Updating…" overlay. The atomic swap, WebView reload, and rollback
+ *     arrive in later issues.
  */
 export interface LiveUpdatePlugin {
   /** Ensure the storage layout + initial `state.json` exist. */
@@ -46,4 +75,11 @@ export interface LiveUpdatePlugin {
   getState(): Promise<LiveUpdateState>;
   /** Fetch the manifest and compare versions. Non-blocking. */
   checkForUpdate(options: CheckForUpdateOptions): Promise<CheckForUpdateResult>;
+  /**
+   * Download + unzip + validate a payload zip into `staging/www/`, showing an
+   * "Updating…" overlay over the WebView. Does NOT swap or reload — those are
+   * later slices. On failure the overlay is dismissed and nothing is mutated.
+   * On success the overlay stays visible (handed off to the swap slice).
+   */
+  prepareUpdate(options: PrepareUpdateOptions): Promise<PrepareUpdateResult>;
 }

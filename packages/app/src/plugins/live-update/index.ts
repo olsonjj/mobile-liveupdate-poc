@@ -22,4 +22,6 @@ export type {
   CheckForUpdateResult,
   LiveUpdatePlugin,
   LiveUpdateState,
+  PrepareUpdateOptions,
+  PrepareUpdateResult,
 } from './definitions';
