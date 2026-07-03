@@ -76,7 +76,6 @@ export interface ReloadResult {
    */
   path: string;
 }
-
 /**
  * TypeScript contract for the inlined native `LiveUpdatePlugin` Swift class
  * (see `packages/app/live-update-plugin/ios/Sources/LiveUpdatePlugin/LiveUpdatePlugin.swift`).
@@ -91,12 +90,18 @@ export interface ReloadResult {
  *     `current/`, rotate the old current into `previous/`, and update
  *     `state.json`. Dismisses the overlay on completion (success or failure).
  *     Does NOT reload the WebView — that is issue 08.
- *   - issue 08 (this slice): `reload` — re-point the Capacitor WebView at the
- *     writable active bundle (`current/www/index.html`) via
+ *   - issue 08: `reload` — re-point the Capacitor WebView at the writable
+ *     active bundle (`current/www/index.html`) via
  *     `CAPBridgeProtocol.setServerBasePath(_:)` (PRD approach 9a). The bridge
  *     re-serves `index.html` + all assets from the new path and the WebView
  *     reloads, so the user sees the updated build number + greeting. No
  *     `CAPBridge` subclassing required. Reused by the rollback flow (issue 09).
+ *   - issue 09 (this slice): `rollBack` — flip `current/www/` and
+ *     `previous/www/` so the prior bundle becomes active, and update
+ *     `state.json` to `{ current: oldPrevious, previous: oldCurrent }`.
+ *     Rejects if there is no `previous` bundle. Does NOT reload the WebView;
+ *     the JS layer calls `reload()` afterward (mirroring the update flow's
+ *     `applyUpdate` → `reload` handoff).
  */
 export interface LiveUpdatePlugin {
   /** Ensure the storage layout + initial `state.json` exist. */
@@ -132,4 +137,15 @@ export interface LiveUpdatePlugin {
    * pointer in `state.json` is never changed here. Reused by rollback (09).
    */
   reload(): Promise<ReloadResult>;
+  /**
+   * Manually roll back to the previous bundle (issue 09). Atomically swaps
+   * `current/www/` and `previous/www/` so the prior bundle becomes active,
+   * and updates `state.json` to `{ current: oldPrevious, previous: oldCurrent }`.
+   * Rejects if `state.previous` is null (no bundle to roll back to). Does NOT
+   * reload the WebView — the JS layer calls {@link LiveUpdatePlugin.reload}
+   * afterward so the user sees the rolled-back build number + greeting, the
+   * same `swap → reload` handoff used by the update flow. On any failure the
+   * active bundle pointer is left unchanged.
+   */
+  rollBack(): Promise<LiveUpdateState>;
 }

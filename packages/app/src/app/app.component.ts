@@ -114,8 +114,8 @@ export class AppComponent implements OnInit, OnDestroy {
 
   /**
    * Whether a previous bundle exists to roll back to. Driven by `state.json`
-   * (`previous` slot). Still no-op on tap — the rollback action itself arrives
-   * in issue 09.
+   * (`previous` slot) and refreshed after a rollback swap. Backs the
+   * `[disabled]` binding on the "Roll Back" button (issue 09).
    */
   readonly canRollBack = signal(false);
 
@@ -125,6 +125,13 @@ export class AppComponent implements OnInit, OnDestroy {
    * can't kick off a second concurrent staging pass over the first.
    */
   private readonly preparing = signal(false);
+
+  /**
+   * Re-entrancy guard for {@link onRollBack} (issue 09). `true` while a
+   * rollback swap + reload is in flight so a double-tap can't fire a second
+   * `rollBack` over the first (which could leave `current/` empty mid-swap).
+   */
+  private readonly rollingBack = signal(false);
 
   /** Handle for the foreground/resume listener (issue 05), cleaned up on destroy. */
   private resumeListener?: { remove: () => Promise<void> };
@@ -161,7 +168,56 @@ export class AppComponent implements OnInit, OnDestroy {
   }
 
   onRollBack(): void {
-    // Implemented in a later slice (issue 09).
+    // Issue 09: flip current/previous so the prior bundle becomes active,
+    // then reload the WebView from it. The native `rollBack` does the
+    // atomic directory swap + state.json update; `reload` re-points the
+    // WebView (the same `setServerBasePath` escape hatch the update flow
+    // uses). On any failure the active bundle is unchanged.
+    void this.runRollBack();
+  }
+
+  //MARK: - Manual rollback (issue 09)
+
+  /**
+   * Drive the native `rollBack` → `reload` pipeline. Updates
+   * {@link canRollBack} from the returned state so the button reflects
+   * whether a further rollback is possible after the swap (it will be
+   * re-derived from a fresh `getState` on the next cold-launch check too).
+   * `reload()` tears down the current JS context, so it is called last and
+   * nothing after it is reliable.
+   */
+  private async runRollBack(): Promise<void> {
+    if (!this.canRollBack()) {
+      return;
+    }
+    if (this.rollingBack()) {
+      return;
+    }
+    this.rollingBack.set(true);
+    try {
+      const newState = await LiveUpdate.rollBack();
+      this.canRollBack.set(newState.previous !== null);
+      this.status.set(
+        `rolled back to build ${newState.current}` +
+          (newState.previous !== null
+            ? ` (previous: ${newState.previous})`
+            : '') +
+          ' — reloading…',
+      );
+      try {
+        await LiveUpdate.reload();
+      } catch (err) {
+        // Reload failed: the swap already succeeded and state.json was
+        // updated, but the WebView couldn't be re-pointed. Surface the
+        // error; the user stays on the still-running bundle. A subsequent
+        // foreground-resume check will re-derive `canRollBack` from state.
+        this.status.set(`reload failed: ${stringifyError(err)}`);
+      }
+    } catch (err) {
+      this.status.set(`rollBack failed: ${stringifyError(err)}`);
+    } finally {
+      this.rollingBack.set(false);
+    }
   }
 
   // MARK: - Download / unzip / validate to staging (issue 06)

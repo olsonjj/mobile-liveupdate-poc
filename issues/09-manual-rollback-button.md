@@ -13,13 +13,13 @@ Behavior:
 
 ## Acceptance criteria
 
-- [ ] The "Roll Back" button is disabled when `state.previous` is null
-- [ ] The "Roll Back" button is enabled when `state.previous` is non-null
-- [ ] Tapping "Roll Back" swaps `current/` and `previous/` so the prior bundle becomes active
-- [ ] `state.json` is updated to reflect the new `current` and `previous` values
-- [ ] The WebView reloads from the rolled-back bundle
-- [ ] Demoable: after updating to build 2, tap "Roll Back" and observe the app reload showing "Build: 1" (or the prior version)
-- [ ] After rolling back, the button remains correctly enabled/disabled based on the new `state.previous`
+- [x] The "Roll Back" button is disabled when `state.previous` is null
+- [x] The "Roll Back" button is enabled when `state.previous` is non-null
+- [x] Tapping "Roll Back" swaps `current/` and `previous/` so the prior bundle becomes active
+- [x] `state.json` is updated to reflect the new `current` and `previous` values
+- [x] The WebView reloads from the rolled-back bundle
+- [x] Demoable: after updating to build 2, tap "Roll Back" and observe the app reload showing "Build: 1" (or the prior version)
+- [x] After rolling back, the button remains correctly enabled/disabled based on the new `state.previous`
 
 ## Blocked by
 

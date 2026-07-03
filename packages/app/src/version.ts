@@ -10,5 +10,5 @@
  * A successful live update is immediately visible on screen because the UI
  * renders both values from this constant.
  */
-export const VERSION: number = 1;
-export const GREETING: string = 'Hello World';
+export const VERSION: number = 6;
+export const GREETING: string = 'Hello World v6';

@@ -26,15 +26,20 @@ import Compression
 ///     `current/`, rotate the old current into `previous/`, and update
 ///     `state.json`. Dismisses the overlay on completion (success or
 ///     failure).
-///   - issue 08 (this slice): `reload` — re-point the Capacitor WebView at the
+///   - issue 08: `reload` — re-point the Capacitor WebView at the
 ///     writable active bundle (`current/www/index.html`) via
 ///     `CAPBridgeProtocol.setServerBasePath(_:)` (approach 9a). The bridge's
 ///     `WebViewAssetHandler` re-serves `index.html` + all assets from the new
 ///     path and the WebView reloads, so the user sees the updated build number
 ///     + greeting. No `CAPBridge` subclassing or `WKWebView.loadFileURL`
 ///     plumbing is required — this is Capacitor's sanctioned off-road escape
-///     hatch for live updates. Rollback (issue 09) reuses this method after
-///     flipping `current`/`previous`.
+///     hatch for live updates. Reused by the rollback flow (issue 09).
+///   - issue 09 (this slice): `rollBack` — flip `current/www/` and
+///     `previous/www/` so the prior bundle becomes active, and update
+///     `state.json` to `{ current: oldPrevious, previous: oldCurrent }`.
+///     Rejects if there is no `previous` bundle. Does NOT reload the WebView;
+///     the JS layer calls `reload()` afterward (mirroring the
+///     `applyUpdate` → `reload` handoff).
 ///
 /// Registration: this class conforms to `CAPBridgedPlugin`; the SPM target is
 /// linked into the app and the bridge instantiates the class because
@@ -52,6 +57,7 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "prepareUpdate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "applyUpdate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "reload", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "rollBack", returnType: CAPPluginReturnPromise),
     ]
 
     // MARK: - Path constants
@@ -313,6 +319,45 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    // MARK: - Manual rollback (issue 09)
+
+    /// Flip the active bundle back to `previous/` (issue 09). Does NOT reload
+    /// the WebView — the JS layer calls `reload()` afterward, mirroring the
+    /// `applyUpdate` → `reload` handoff from issues 07/08.
+    ///
+    /// Flow (all on a background queue):
+    ///   1. Read current state. If `previous` is nil, reject — the JS layer
+    ///      keeps the "Roll Back" button disabled in that case, but the
+    ///      native guard is the source of truth.
+    ///   2. Validate `previous/www/index.html` exists (refuse rather than swap
+    ///      in a missing/broken bundle).
+    ///   3. Move `current/www/` to a temp backup (if it exists).
+    ///   4. Move `previous/www/` into `current/www/` (the previous bundle
+    ///      becomes active). On failure: restore the backup so the active
+    ///      bundle is unchanged and reject.
+    ///   5. Move the temp backup into `previous/www/` (overwriting whatever was
+    ///      there) so the rolled-forward bundle is now the rollback target.
+    ///   6. Write `state.json` atomically to
+    ///      `{ current: oldPrevious, previous: oldCurrent }`.
+    ///      On failure: best-effort restore the prior directory arrangement
+    ///      (move current back to previous, move backup back to current) so
+    ///      on-disk reality matches the unchanged state, then reject.
+    ///   7. Resolve with the new state.
+    ///
+    /// The active bundle pointer is never left empty on a failure path; a
+    /// failed rollback is equivalent to no rollback having been attempted.
+    @objc func rollBack(_ call: CAPPluginCall) {
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try self.ensureLayout()
+                let newState = try self.performRollback()
+                call.resolve(self.stateToJS(newState))
+            } catch {
+                call.reject("rollBack failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
     // MARK: - Atomic swap (issue 07)
 
     /// Perform the staging → current → previous rotation described in the
@@ -387,6 +432,87 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
             try? fm.moveItem(at: currentBundleURL, to: stagingBundleURL)
             if fm.fileExists(atPath: previousBundleURL.path) {
                 try? fm.moveItem(at: previousBundleURL, to: currentBundleURL)
+            }
+            throw LiveUpdateError.stateWriteFailed(error.localizedDescription)
+        }
+
+        return newState
+    }
+
+    // MARK: - Rollback rotation (issue 09)
+
+    /// Swap `current/www/` and `previous/www/` so the prior bundle becomes
+    /// active, with best-effort restore on any failure so `current/` is never
+    /// left empty or half-written. Returns the new state to persist + return
+    /// to JS. Rejects if there is no `previous` bundle to roll back to.
+    private func performRollback() throws -> LiveUpdateState {
+        let fm = FileManager.default
+
+        let oldState = try readState()
+        guard let oldPrevious = oldState.previous else {
+            throw LiveUpdateError.noPreviousBundle
+        }
+        let oldCurrent = oldState.current
+
+        // The previous bundle is the one we're promoting to active — it must
+        // actually be present and contain an index.html.
+        let previousIndex = previousBundleURL.appendingPathComponent("index.html")
+        guard fm.fileExists(atPath: previousIndex.path) else {
+            throw LiveUpdateError.previousMissing
+        }
+
+        // Temp backup for the currently-active bundle (if any). Lives outside
+        // the liveupdates root so a crash can't leave a stray half-slot.
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let backupURL = tempDir.appendingPathComponent("liveupdate-rollback-\(UUID().uuidString)", isDirectory: true)
+        var hasBackup = false
+        if fm.fileExists(atPath: currentBundleURL.path) {
+            try fm.moveItem(at: currentBundleURL, to: backupURL)
+            hasBackup = true
+        }
+
+        // Promote previous into current. If this fails, restore the backup so
+        // the active bundle is unchanged and reject.
+        do {
+            try fm.moveItem(at: previousBundleURL, to: currentBundleURL)
+        } catch {
+            if hasBackup {
+                try? fm.moveItem(at: backupURL, to: currentBundleURL)
+            }
+            throw LiveUpdateError.swapFailed(error.localizedDescription)
+        }
+
+        // previous → current succeeded. The old current (backup) now becomes
+        // the new previous, overwriting whatever was there before (there
+        // should be nothing, since previous/ was just moved away, but be safe).
+        if fm.fileExists(atPath: previousBundleURL.path) {
+            try? fm.removeItem(at: previousBundleURL)
+        }
+        if hasBackup {
+            do {
+                try fm.moveItem(at: backupURL, to: previousBundleURL)
+            } catch {
+                // Non-fatal: previous/ is best-effort rollback storage. The
+                // active swap already succeeded; we just lose the new rollback
+                // slot. The state write below reflects previous = oldCurrent
+                // even if the dir is missing — surfaced as a missing index on
+                // a subsequent rollback attempt.
+                try? fm.removeItem(at: backupURL)
+            }
+        }
+
+        // Persist the new state atomically. On failure, roll the directory
+        // arrangement back so on-disk reality matches the unchanged state.
+        let newState = LiveUpdateState(current: oldPrevious, previous: oldCurrent)
+        do {
+            try writeState(newState)
+        } catch {
+            // Restore: move current back to previous, move backup back to
+            // current. previous may be lost in this error path, but
+            // state.json was never updated.
+            try? fm.moveItem(at: currentBundleURL, to: previousBundleURL)
+            if hasBackup {
+                try? fm.moveItem(at: backupURL, to: currentBundleURL)
             }
             throw LiveUpdateError.stateWriteFailed(error.localizedDescription)
         }
@@ -587,6 +713,8 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         case downloadFailed(String)
         case missingIndexHtml
         case stagingMissing
+        case previousMissing
+        case noPreviousBundle
         case swapFailed(String)
         case stateWriteFailed(String)
 
@@ -600,6 +728,8 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
             case .downloadFailed(let s): return "download failed: \(s)"
             case .missingIndexHtml: return "payload missing index.html at bundle root"
             case .stagingMissing: return "no staged bundle to apply"
+            case .previousMissing: return "previous bundle missing index.html"
+            case .noPreviousBundle: return "no previous bundle to roll back to"
             case .swapFailed(let s): return "atomic swap failed: \(s)"
             case .stateWriteFailed(let s): return "state.json write failed: \(s)"
             }
