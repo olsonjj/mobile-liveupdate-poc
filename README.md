@@ -36,7 +36,15 @@ and is inspectable via `xcrun simctl get_app_container`. The download/unzip
 the full update pipeline runs — `prepareUpdate` → `applyUpdate` → `reload` —
 so publishing build N+1 on the server and foregrounding the app shows the
 "Updating…" overlay followed by a reload displaying build N+1's greeting.
-Rollback (09) and end-to-end hardening (10) remain.
+Rollback (09) is implemented: the "Roll Back" button flips `current/www/` and
+`previous/www/` and reloads to the prior build. End-to-end error-path
+hardening + DoD verification (10) is complete — every failure mode (corrupt
+zip, missing-`index.html` zip, swap-move failure, `state.json`-write failure)
+was verified on the iOS simulator to leave the active bundle running and
+`state.json`/`current/` unchanged, and the full definition-of-done walkthrough
+(launch build N → publish N+1 → foreground → update + reload → roll back →
+reload to N) passes. See
+[`docs/decisions/10-error-path-hardening.md`](docs/decisions/10-error-path-hardening.md).
 
 The **foreground-resume trigger** slice is implemented (issue 05): on iOS the
 app subscribes to `@capacitor/app`'s `appStateChange` event and, when the app
@@ -115,6 +123,34 @@ pnpm test         # run tests across all workspaces
   `CAPBridgeProtocol.setServerBasePath(_:)` (PRD approach 9a). The fallback
   runtime-module-swap (9b) is **not** implemented because 9a is feasible
   with a ~10-line native method and no `CAPBridge` subclassing.
+- [`docs/decisions/10-error-path-hardening.md`](docs/decisions/10-error-path-hardening.md)
+  — the four PRD failure modes (corrupt zip, missing-`index.html` zip,
+  swap-move failure, `state.json`-write failure) were verified on the iOS
+  simulator to leave the active bundle running and `state.json`/`current/`
+  unchanged. The two internal failure modes (swap-move, state-write) are
+  exercised via debug-only, env-gated fault injection (`LIVEUPDATE_FAULT`);
+  the DoD walkthrough's rollback step is driven via a debug-only
+  `LIVEUPDATE_AUTO_ROLLBACK` hook. Both hooks are no-ops in a normal app
+  run. The full definition-of-done walkthrough (launch build N → publish N+1
+  → foreground → update + reload → roll back → reload to N) passes.
+
+## Verified error-path behaviour (issue 10)
+
+Every failure mode during the update process was verified on the iOS
+simulator to leave the **active bundle running** and `state.json` /
+`current/www/` **unchanged** — a failed update is equivalent to no update
+having been attempted (PRD user story 40):
+
+| Failure mode | Trigger | Result on failure |
+| --- | --- | --- |
+| Corrupt / incomplete zip | `payloads/build-3-corrupt.zip` (random bytes, no EOCD) | `prepareUpdate` rejects after `unzip` throws; `staging/` + temp zip cleaned; overlay dismissed |
+| Zip missing `index.html` | `payloads/build-3-noindex.zip` (valid zip, only `readme.txt`) | `prepareUpdate` rejects after the `index.html` guard; `staging/` cleaned; overlay dismissed |
+| Directory-move failure | `LIVEUPDATE_FAULT=swap` (debug injection) | `applyUpdate` restores the temp backup into `current/`; new bundle left in `staging/`; state untouched |
+| `state.json`-write failure | `LIVEUPDATE_FAULT=stateWrite` (debug injection) | `applyUpdate` restores directories (current→staging, previous→current); state never written |
+
+In all four cases the app continued showing the previously active bundle.
+See `docs/decisions/10-error-path-hardening.md` for the full verification
+record and the screenshot set under `screenshots/issue10-phase*`.
 
 ## Definition of done (POC)
 

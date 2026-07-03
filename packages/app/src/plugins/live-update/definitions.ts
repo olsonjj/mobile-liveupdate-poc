@@ -148,4 +148,10 @@ export interface LiveUpdatePlugin {
    * active bundle pointer is left unchanged.
    */
   rollBack(): Promise<LiveUpdateState>;
+  /**
+   * DEBUG-ONLY: read a named launch environment variable (issue 10). Used to
+   * drive debug-gated verification flows (e.g. `LIVEUPDATE_AUTO_ROLLBACK` and
+   * `LIVEUPDATE_FAULT`). Never set in a normal app run.
+   */
+  debugEnv(options: { name: string }): Promise<{ value: string | null }>;
 }

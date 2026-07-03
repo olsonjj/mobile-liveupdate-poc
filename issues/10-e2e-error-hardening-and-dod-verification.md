@@ -23,12 +23,12 @@ In every case, the app must continue showing the currently active bundle with no
 
 ## Acceptance criteria
 
-- [ ] A corrupt zip leaves the active bundle running and `state.json`/`current/` unchanged
-- [ ] A zip missing `index.html` leaves the active bundle running and `state.json`/`current/` unchanged
-- [ ] A failure during the directory move restores prior state and leaves the active bundle running
-- [ ] A failure during the `state.json` write restores prior state and leaves the active bundle running
-- [ ] The definition-of-done walkthrough passes end-to-end on the iOS simulator: launch at build N → publish N+1 → foreground → update + reload to N+1 → roll back → reload to N
-- [ ] A note is added to the README documenting the verified error-path behaviors
+- [x] A corrupt zip leaves the active bundle running and `state.json`/`current/` unchanged
+- [x] A zip missing `index.html` leaves the active bundle running and `state.json`/`current/` unchanged
+- [x] A failure during the directory move restores prior state and leaves the active bundle running
+- [x] A failure during the `state.json` write restores prior state and leaves the active bundle running
+- [x] The definition-of-done walkthrough passes end-to-end on the iOS simulator: launch at build N → publish N+1 → foreground → update + reload to N+1 → roll back → reload to N
+- [x] A note is added to the README documenting the verified error-path behaviors
 
 ## Blocked by
 

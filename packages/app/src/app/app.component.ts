@@ -141,6 +141,30 @@ export class AppComponent implements OnInit, OnDestroy {
     // already rendered from the bundled version constant.
     await this.runCheck('cold');
 
+    // DEBUG-ONLY auto-rollback (issue 10 verification). `LIVEUPDATE_AUTO_ROLLBACK`
+    // holds the build number to roll back FROM: when the *running* bundle's
+    // build number matches, a rollback is triggered deterministically. This is
+    // one-shot per build (a rolled-back bundle has a different number, so it
+    // won't match and won't loop). Never set in a normal app run; production
+    // behaviour is unaffected. See docs/decisions/10-error-path-hardening.md.
+    if (Capacitor.isNativePlatform()) {
+      try {
+        const flag = await LiveUpdate.debugEnv({
+          name: 'LIVEUPDATE_AUTO_ROLLBACK',
+        });
+        if (flag.value === String(this.version) && this.canRollBack()) {
+          this.status.set(
+            `${this.status()} | auto-rollback build ${this.version} (DEBUG)`,
+          );
+          await this.runRollBack();
+          // reload() tears down this JS context; nothing below is reliable.
+          return;
+        }
+      } catch {
+        // debug-only: ignore.
+      }
+    }
+
     // Foreground-resume trigger (PRD user story 13 + 14, issue 05): when the
     // app returns to the foreground, re-run the version check silently. The
     // native plugin layer is only present on iOS; on `ng serve` the listener

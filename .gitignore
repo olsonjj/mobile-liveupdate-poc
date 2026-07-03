@@ -21,6 +21,7 @@ packages/app/ios/App/App/capacitor.config.json
 # Inlined live-update plugin (local SPM package) build artifacts
 packages/app/live-update-plugin/.build/
 packages/app/live-update-plugin/.swiftpm/
+packages/app/live-update-plugin/Package.resolved
 
 # Server payloads (generated zips, kept local)
 packages/server/payloads/*.zip

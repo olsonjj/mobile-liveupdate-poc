@@ -58,6 +58,7 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "applyUpdate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "reload", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "rollBack", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "debugEnv", returnType: CAPPluginReturnPromise),
     ]
 
     // MARK: - Path constants
@@ -72,6 +73,18 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
     /// Tag used to find the "Updating…" overlay view in the WebView's superview
     /// so it can be removed without holding a strong reference to it.
     private let overlayTag = 0x4C56_5550
+
+    /// DEBUG-ONLY fault injection used to verify the swap-move and state-write
+    /// error paths on the simulator (issue 10). Read from the `LIVEUPDATE_FAULT`
+    /// launch environment variable — only settable via `simctl launch`, never
+    /// present in a normal app run, so production behaviour is unaffected.
+    /// Recognised values: `"swap"` (fail the staging→current move, exercising
+    /// the backup-restore path) and `"stateWrite"` (fail the `state.json`
+    /// write after a successful swap, exercising the directory restore path).
+    /// See `docs/decisions/10-error-path-hardening.md`.
+    private static var debugFault: String? {
+        ProcessInfo.processInfo.environment["LIVEUPDATE_FAULT"]
+    }
 
     /// `<Application Support>/liveupdates/` — writable, app-scoped, persists
     /// across launches, and is inspectable via `xcrun simctl get_app_container`.
@@ -358,6 +371,26 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    /// DEBUG-ONLY: read a named launch environment variable (issue 10). Used by
+    /// the TS layer to drive debug-gated verification flows — e.g.
+    /// `LIVEUPDATE_AUTO_ROLLBACK=<buildNo>` auto-triggers a rollback when the
+    /// *running* bundle matches `<buildNo>`, so the DoD walkthrough's rollback
+    /// step can be exercised deterministically without a UI tap (the agent
+    /// harness has no Accessibility/Input-Monitoring permission to click the
+    /// Simulator). Never set in a normal app run; production behaviour is
+    /// unaffected. See `docs/decisions/10-error-path-hardening.md`.
+    @objc func debugEnv(_ call: CAPPluginCall) {
+        guard let name = call.options?["name"] as? String, !name.isEmpty else {
+            call.reject("name is required")
+            return
+        }
+        if let value = ProcessInfo.processInfo.environment[name] {
+            call.resolve(["value": value])
+        } else {
+            call.resolve(["value": NSNull()])
+        }
+    }
+
     // MARK: - Atomic swap (issue 07)
 
     /// Perform the staging → current → previous rotation described in the
@@ -392,6 +425,13 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         // Promote staging into current. If this fails, restore the backup so
         // the active bundle is unchanged and reject.
         do {
+            if let fault = Self.debugFault, fault == "swap" {
+                // Issue-10 verification: simulate a directory-move failure AFTER
+                // current→backup, so the real backup-restore path runs.
+                throw NSError(domain: "LiveUpdate", code: 99, userInfo: [
+                    NSLocalizedDescriptionKey: "injected fault (LIVEUPDATE_FAULT=swap)",
+                ])
+            }
             try fm.moveItem(at: stagingBundleURL, to: currentBundleURL)
         } catch {
             if hasBackup {
@@ -418,11 +458,20 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         }
 
         // Persist the new state atomically. `Data.write(options: .atomic)`
-        // writes to a temp file and renames, so a write failure cannot leave
-        // a truncated state.json. If it somehow fails, roll the directory
-        // arrangement back so on-disk reality matches the (unchanged) state.
+        // writes to a temp file and renames, so a write failure cannot leave a
+        // truncated state.json. If it somehow fails (or the issue-10 debug
+        // fault fires), roll the directory arrangement back so on-disk reality
+        // matches the (unchanged) state.
         let newState = LiveUpdateState(current: newVersion, previous: oldCurrent)
         do {
+            if let fault = Self.debugFault, fault == "stateWrite" {
+                // Issue-10 verification: simulate a `state.json` write failure
+                // AFTER the swap succeeded, so the real directory-restore path
+                // runs (current→staging, previous→current).
+                throw NSError(domain: "LiveUpdate", code: 98, userInfo: [
+                    NSLocalizedDescriptionKey: "injected fault (LIVEUPDATE_FAULT=stateWrite)",
+                ])
+            }
             try writeState(newState)
         } catch {
             // Restore: move the new current back to staging, move previous
