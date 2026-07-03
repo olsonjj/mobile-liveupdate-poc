@@ -49,6 +49,22 @@ export interface SwapResult {
   error: string | null;
 }
 
+/** Result of a rollback call. */
+export interface RollbackResult {
+  /** True if the rollback succeeded. */
+  success: boolean;
+  /** The version number rolled back to (only on success). */
+  version: number | null;
+  /** Human-readable error message (only on failure). */
+  error: string | null;
+}
+
+/** Result of a reloadWebView call. */
+export interface ReloadResult {
+  /** True if the WebView was reloaded from the current bundle. */
+  reloaded: boolean;
+}
+
 /** Interface exposed by the LiveUpdate Capacitor plugin. */
 export interface LiveUpdatePluginPlugin {
   /**
@@ -109,5 +125,26 @@ export interface LiveUpdatePluginPlugin {
    */
   swapToStagedUpdate(options: {
     version: number;
+    bundledBuildNumber: number;
   }): Promise<SwapResult>;
+
+  /**
+   * Reload the Capacitor WebView from the current bundle's index.html
+   * (approach 9a). Uses WKWebView.loadFileURL to point the WebView at
+   * the writable `current/www/` directory.
+   *
+   * If no current bundle exists (first launch before any update),
+   * resolves with `{ reloaded: false }` — the app is already showing
+   * the bundled assets.
+   */
+  reloadWebView(): Promise<ReloadResult>;
+
+  /**
+   * Swap `previous/` into `current/`, update state.json, and reload
+   * the WebView from the rolled-back bundle.
+   *
+   * On failure (no previous bundle, or directory operations fail)
+   * returns `{ success: false, version: null, error: "…" }`.
+   */
+  rollback(): Promise<RollbackResult>;
 }

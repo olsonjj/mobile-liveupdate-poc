@@ -3,7 +3,7 @@ import { BehaviorSubject, Observable } from 'rxjs';
 import { App } from '@capacitor/app';
 import type { PluginListenerHandle } from '@capacitor/core';
 import LiveUpdate from './plugin';
-import type { CheckResult, DownloadAndStageResult, GetStateResult, SwapResult } from './types';
+import type { CheckResult, DownloadAndStageResult, GetStateResult, RollbackResult, SwapResult } from './types';
 import { BUILD } from '../version';
 import { environment } from '../../environments/environment';
 
@@ -46,17 +46,22 @@ export class UpdateService implements OnDestroy {
 
   /**
    * Called once on cold launch. Initialises the plugin storage (creates
-   * directories and state.json if needed) and performs a non-blocking
-   * version check against the server.
+   * directories and state.json if needed), redirects the Capacitor server
+   * to the current bundle if one exists from a previous session, and
+   * performs a non-blocking version check against the server.
    *
-   * Both the init and the check are fire-and-forget: the app shows its
-   * current bundle immediately regardless of network latency.
+   * The init and check are fire-and-forget: the app shows its current
+   * bundle immediately regardless of network latency.
    */
   async initialize(): Promise<void> {
     try {
       await LiveUpdate.initialize();
       const currentState = await LiveUpdate.getState();
       this.ngZone.run(() => this.state.next(currentState));
+      // Note: initialize() on the native side already sets the server base
+      // path to current/www/ if it exists. The initial page load happens
+      // before Angular boots, so a full cold-launch will show the app-bundle
+      // assets until the next foreground-check or a new update triggers.
     } catch (err) {
       console.warn('[LiveUpdate] initialize failed (already initialised?):', err);
     }
@@ -104,7 +109,11 @@ export class UpdateService implements OnDestroy {
       // Refresh in-memory state
       await this.refreshState();
 
-      // Dismiss overlay (reload comes in issue 08)
+      // 8. Reload the WebView from the new bundle (approach 9a)
+      console.log('[LiveUpdate] Reloading WebView from new bundle v%d', version);
+      await LiveUpdate.reloadWebView();
+
+      // Dismiss overlay after reload triggers (the page navigation will clear it visually)
       this.ngZone.run(() => this.isUpdating.next(false));
 
       console.log('[LiveUpdate] Update complete for v%d', version);
@@ -120,7 +129,36 @@ export class UpdateService implements OnDestroy {
    * Atomically swap the staged bundle into `current/` and update state.json.
    */
   async swapToStagedUpdate(version: number): Promise<SwapResult> {
-    return LiveUpdate.swapToStagedUpdate({ version });
+    return LiveUpdate.swapToStagedUpdate({ version, bundledBuildNumber: BUILD.number });
+  }
+
+  /**
+   * Roll back to the previous bundle. Swaps `previous/` into `current/`
+   * on the native side, updates state.json, and reloads the WebView.
+   *
+   * Shows the updating overlay during the operation. On failure the
+   * overlay is dismissed and the active bundle is left untouched.
+   */
+  async rollback(): Promise<RollbackResult> {
+    this.ngZone.run(() => this.isUpdating.next(true));
+
+    try {
+      const result = await LiveUpdate.rollback();
+
+      if (result.success) {
+        await this.refreshState();
+        console.log('[LiveUpdate] Rolled back to v%d', result.version);
+      } else {
+        this.ngZone.run(() => this.isUpdating.next(false));
+        console.warn('[LiveUpdate] Rollback failed:', result.error);
+      }
+
+      return result;
+    } catch (err) {
+      this.ngZone.run(() => this.isUpdating.next(false));
+      console.warn('[LiveUpdate] rollback threw:', err);
+      return { success: false, version: null, error: String(err) };
+    }
   }
 
   /**

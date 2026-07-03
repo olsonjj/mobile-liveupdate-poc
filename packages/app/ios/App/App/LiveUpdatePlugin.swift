@@ -14,6 +14,8 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "checkForUpdate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "downloadAndStageUpdate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "swapToStagedUpdate", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "reloadWebView", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "rollback", returnType: CAPPluginReturnPromise),
     ]
 
     // MARK: - Storage paths
@@ -55,7 +57,9 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
 
     // MARK: - initialize
 
-    /// Ensure the storage layout exists.
+    /// Ensure the storage layout exists and, if a previously-downloaded current
+    /// bundle is present, redirect the Capacitor server to serve from it.
+    ///
     /// Creates `liveupdates/`, `current/`, `previous/`, and an initial `state.json`
     /// with `{ "current": null, "previous": null }` if one doesn't already exist.
     @objc func initialize(_ call: CAPPluginCall) {
@@ -68,6 +72,16 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
                 let initial: [String: Any?] = ["current": nil, "previous": nil]
                 let data = try JSONSerialization.data(withJSONObject: initial, options: [.prettyPrinted, .sortedKeys])
                 try data.write(to: stateFile, options: .atomic)
+            }
+
+            // If a current bundle exists from a previous update, redirect the
+            // Capacitor server to serve from it on this cold launch.
+            let indexURL = currentWwwDir.appendingPathComponent("index.html")
+            if FileManager.default.fileExists(atPath: indexURL.path) {
+                DispatchQueue.main.async {
+                    self.bridge?.setServerBasePath(self.currentWwwDir.path)
+                    NSLog("[LiveUpdate] initialize: restored server base path to current bundle")
+                }
             }
 
             call.resolve([:])
@@ -313,11 +327,13 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
     ///
     /// Accepts options:
     ///   - version: number (the new version being swapped in)
+    ///   - bundledBuildNumber: number (the build number baked into the app, used as previous on first update)
     ///
     /// On success returns `{ success: true, version: N, error: null }`.
     /// On any failure restores the prior arrangement and returns `{ success: false, version: null, error: "…" }`.
     @objc func swapToStagedUpdate(_ call: CAPPluginCall) {
         let version = call.getInt("version") ?? 0
+        let bundledBuildNumber = call.getInt("bundledBuildNumber") ?? 1
 
         NSLog("[LiveUpdate] swapToStagedUpdate for v%d", version)
 
@@ -336,8 +352,9 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
             return
         }
 
-        // 2. Read current state
+        // 2. Read current state; fall back to bundledBuildNumber for previous on first update
         let oldCurrent: Int? = self.readCurrentVersion()
+        let previousVersion = oldCurrent ?? bundledBuildNumber
 
         // 3. Snapshot whether previous directory existed before swap
         let previousExistedBefore = FileManager.default.fileExists(atPath: self.previousDir.path)
@@ -352,9 +369,17 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
                 try FileManager.default.removeItem(at: self.previousDir)
             }
 
-            // 5. If current/ exists, move it to previous/
+            // 5. If current/ exists and has content, move it to previous/ for rollback.
+            //    On first update current/ is empty (just a placeholder), so previous/
+            //    stays empty — rollback will fall back to the app bundle.
             if currentExistedBefore {
-                try FileManager.default.moveItem(at: self.currentDir, to: self.previousDir)
+                let currentContents = (try? FileManager.default.contentsOfDirectory(at: self.currentDir, includingPropertiesForKeys: nil)) ?? []
+                if !currentContents.isEmpty {
+                    try FileManager.default.moveItem(at: self.currentDir, to: self.previousDir)
+                } else {
+                    // Empty placeholder — just remove it
+                    try FileManager.default.removeItem(at: self.currentDir)
+                }
             }
 
             // 6. Create fresh current/www/
@@ -363,10 +388,10 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
             // 7. Move staged content into current/www/
             try self.moveContentsOfDirectory(from: stagedRoot, to: self.currentWwwDir)
 
-            // 8. Update state.json
+            // 8. Update state.json — always record previousVersion so rollback is available
             let state: [String: Any?] = [
                 "current": version,
-                "previous": (oldCurrent as Any?),
+                "previous": previousVersion,
             ]
             let data = try JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: self.stateFile, options: .atomic)
@@ -375,7 +400,7 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
             self.cleanupStaging()
             self.cleanupBackup()
 
-            NSLog("[LiveUpdate] Swap complete: current=v%d, previous=%@", version, oldCurrent.map { String($0) } ?? "null")
+            NSLog("[LiveUpdate] Swap complete: current=v%d, previous=v%d", version, previousVersion)
             call.resolve([
                 "success": true,
                 "version": version,
@@ -392,8 +417,6 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
                 }
                 // Move previous/ back to current/
                 try? FileManager.default.moveItem(at: self.previousDir, to: self.currentDir)
-
-                // If there was a previous before, it's lost — but this is a POC.
             }
 
             // Restore state.json if we have a backup (best-effort for POC)
@@ -408,17 +431,164 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    // MARK: - reloadWebView
+
+    /// Reload the Capacitor WebView from the current bundle's directory.
+    ///
+    /// Approach 9a: uses Capacitor's sanctioned `setServerBasePath` API to redirect
+    /// where the internal web server serves assets from, then triggers a WebView
+    /// reload. This is the same mechanism Ionic AppFlow uses for live updates.
+    ///
+    /// If the current bundle does not exist (e.g. first launch before any update),
+    /// the method resolves successfully without reloading — the app is already showing
+    /// the bundled assets.
+    ///
+    /// The previous approach (loadFileURL) failed because Capacitor's navigation
+    /// delegate intercepts file:// URLs and tries to open them externally in Safari.
+    /// setServerBasePath avoids this by keeping requests within the capacitor:// scheme.
+    @objc func reloadWebView(_ call: CAPPluginCall) {
+        let indexURL = currentWwwDir.appendingPathComponent("index.html")
+
+        guard FileManager.default.fileExists(atPath: indexURL.path) else {
+            // No current bundle yet — app is running the bundled assets, nothing to do.
+            NSLog("[LiveUpdate] reloadWebView: no current bundle, skipping reload")
+            call.resolve(["reloaded": false])
+            return
+        }
+
+        guard let bridge = self.bridge else {
+            call.reject("Bridge not available")
+            return
+        }
+
+        NSLog("[LiveUpdate] reloadWebView: setting server base path to %@", self.currentWwwDir.path)
+
+        DispatchQueue.main.async {
+            // Tell Capacitor's internal web server to serve assets from the writable bundle
+            bridge.setServerBasePath(self.currentWwwDir.path)
+
+            // Reload the WebView — Capacitor's server will now serve from current/www/
+            bridge.webView?.reload()
+
+            call.resolve(["reloaded": true])
+        }
+    }
+
+    // MARK: - rollback
+
+    /// Swap `previous/` into `current/` (and the old current into previous),
+    /// update state.json, and reload the WebView from the rolled-back bundle.
+    ///
+    /// On success returns `{ success: true, version: N, error: null }`.
+    /// On failure (no previous bundle, or directory operations fail) returns
+    /// `{ success: false, version: null, error: "…" }`.
+    @objc func rollback(_ call: CAPPluginCall) {
+        // 1. Check a previous bundle exists
+        guard let previousVersion = self.readPreviousVersion() else {
+            call.resolve(["success": false, "version": NSNull(), "error": "No previous bundle to roll back to"])
+            return
+        }
+
+        // 2. Read current version
+        let oldCurrent: Int? = self.readCurrentVersion()
+
+        NSLog("[LiveUpdate] rollback: swapping previous(v%d) ↔ current(v%@)",
+              previousVersion, oldCurrent.map { String($0) } ?? "null")
+
+        // 3. Snapshot existence
+        let currentExisted = FileManager.default.fileExists(atPath: self.currentDir.path)
+        let previousExisted = FileManager.default.fileExists(atPath: self.previousDir.path)
+
+        // Use a temp directory to stage the swap
+        let tmpDir = liveUpdatesRoot.appendingPathComponent(".rollback_tmp", isDirectory: true)
+
+        do {
+            // Clean any leftover tmp
+            if FileManager.default.fileExists(atPath: tmpDir.path) {
+                try FileManager.default.removeItem(at: tmpDir)
+            }
+
+            // 4. Move current → tmp, previous → current, then clear previous and move tmp → previous
+            if currentExisted {
+                try FileManager.default.moveItem(at: self.currentDir, to: tmpDir)
+            }
+
+            if previousExisted {
+                try FileManager.default.moveItem(at: self.previousDir, to: self.currentDir)
+            }
+
+            // If there was a current, it's now in tmp; move it to previous
+            if currentExisted {
+                // Ensure previous dir does not exist (should already be gone from the move above)
+                if FileManager.default.fileExists(atPath: self.previousDir.path) {
+                    try FileManager.default.removeItem(at: self.previousDir)
+                }
+                try FileManager.default.moveItem(at: tmpDir, to: self.previousDir)
+            }
+
+            // 5. Update state.json: rolled-back version becomes current; old current becomes previous
+            let state: [String: Any?] = [
+                "current": previousVersion,
+                "previous": (oldCurrent as Any?),
+            ]
+            let data = try JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys])
+            try data.write(to: self.stateFile, options: .atomic)
+
+            // Recreate empty current/ placeholder if it was moved away during swap
+            if !FileManager.default.fileExists(atPath: self.currentDir.path) {
+                try self.createDirectoryIfNeeded(self.currentDir)
+            }
+
+            NSLog("[LiveUpdate] Rollback swap complete: current=v%d, previous=%@",
+                  previousVersion, oldCurrent.map { String($0) } ?? "null")
+
+            // 6. Reload the WebView from the rolled-back current bundle.
+            //    If current/www/index.html exists, serve from it; otherwise reset
+            //    to the app-bundle default (e.g. rolling back to the original build).
+            let indexURL = self.currentWwwDir.appendingPathComponent("index.html")
+            let appBundlePublic = Bundle.main.bundleURL.appendingPathComponent("public")
+            DispatchQueue.main.async {
+                if FileManager.default.fileExists(atPath: indexURL.path) {
+                    self.bridge?.setServerBasePath(self.currentWwwDir.path)
+                    NSLog("[LiveUpdate] rollback: serving from current bundle")
+                } else {
+                    // Reset to app bundle default
+                    self.bridge?.setServerBasePath(appBundlePublic.path)
+                    NSLog("[LiveUpdate] rollback: reset to app bundle default")
+                }
+                self.bridge?.webView?.reload()
+            }
+
+            call.resolve(["success": true, "version": previousVersion, "error": NSNull()])
+        } catch {
+            // Best-effort restore if anything went wrong
+            NSLog("[LiveUpdate] Rollback failed: %@", error.localizedDescription)
+            if FileManager.default.fileExists(atPath: tmpDir.path) {
+                // Move tmp back to current if current is missing
+                if !FileManager.default.fileExists(atPath: self.currentDir.path) {
+                    try? FileManager.default.moveItem(at: tmpDir, to: self.currentDir)
+                } else {
+                    try? FileManager.default.removeItem(at: tmpDir)
+                }
+            }
+            call.resolve(["success": false, "version": NSNull(), "error": "Rollback failed: \(error.localizedDescription)"])
+        }
+    }
+
     // MARK: - Helpers
 
     /// Read the `current` version from state.json, or nil if it doesn't exist or has no value.
     private func readCurrentVersion() -> Int? {
         guard FileManager.default.fileExists(atPath: stateFile.path),
               let data = try? Data(contentsOf: stateFile),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let current = json["current"] as? Int else {
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
-        return current
+        // state.current might be an Int or NSNull
+        if let current = json["current"] as? Int {
+            return current
+        }
+        return nil
     }
 
     /// Create a directory (including intermediate directories) if it doesn't already exist.

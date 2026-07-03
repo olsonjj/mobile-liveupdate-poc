@@ -102,9 +102,22 @@ export class HomePage implements OnInit, OnDestroy {
   }
 
   /**
-   * Placeholder for rollback. Will be wired to the live-update plugin in a later slice.
+   * Roll back to the previous bundle.
+   *
+   * Calls the native plugin to swap `previous/` into `current/`, update
+   * state.json, and reload the WebView from the rolled-back bundle.
    */
   rollBack(): void {
-    // no-op until the live-update plugin is integrated
+    if (!this.hasPrevious) {
+      return;
+    }
+
+    this.updateService.rollback().then((result) => {
+      if (!result.success) {
+        console.warn('[HomePage] Rollback failed:', result.error);
+      }
+    }).catch((err) => {
+      console.warn('[HomePage] rollback threw:', err);
+    });
   }
 }

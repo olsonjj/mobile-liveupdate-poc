@@ -8,12 +8,39 @@ alternative to Ionic AppFlow's Live Updates feature.
 > no integrity verification beyond an `index.html` presence check. **Do not ship
 > this code to real users.** See the limitations section below and `PRD.md`.
 
+## WebView reload approach (decision 9a)
+
+The POC uses **approach 9a**: after a successful swap, Capacitor's
+`setServerBasePath(path:)` API redirects where the internal web server serves
+assets from, then `webView.reload()` triggers a full page reload. This is the
+same mechanism Ionic AppFlow uses for live updates.
+
+**Why `setServerBasePath` instead of `loadFileURL`:**
+
+- `WKWebView.loadFileURL(_:allowingReadAccessTo:)` was attempted first but
+  failed. Capacitor's `WKNavigationDelegate` intercepts `file://` navigations
+  and attempts to open them externally (in Safari), causing a sandbox/security
+  error (`FBSOpenApplicationServiceErrorDomain`).
+- `setServerBasePath` avoids this entirely: requests stay within the
+  `capacitor://` scheme, Capacitor's internal server handles them, and the
+  bridge reinitialization is seamless. This is Capacitor's sanctioned API for
+  changing the asset root at runtime.
+
+**Why 9a instead of 9b (runtime module swap):**
+
+- 9a is cleaner: the entire web bundle is swapped and the WebView does a full
+  reload, so `index.html`, all JS bundles, and all assets come from the updated
+  directory.
+- 9b is uglier: it keeps the app-bundle shell and dynamically imports JS from
+  the writable directory. It does not update `index.html` cleanly and increases
+  complexity in the Angular entrypoint.
+
 ## Status
 
-Currently this repository is **scaffolding only** — a pnpm-workspaces monorepo
-with empty placeholder packages. App and server logic will be filled in by
-subsequent slices. See `issues/` for the implementation plan and `PRD.md` for the
-full product requirements.
+Core update flow implemented: the app checks for updates on launch and foreground,
+downloads new web bundles, atomically swaps them, and reloads the WebView.
+Rollback is wired up via the UI button. See `PRD.md` for the full product
+requirements and `issues/` for the implementation plan.
 
 ## Monorepo layout
 
