@@ -167,30 +167,48 @@ export class AppComponent implements OnInit, OnDestroy {
   // MARK: - Download / unzip / validate to staging (issue 06)
 
   /**
-   * Drive the native `prepareUpdate`: download the payload zip, unzip it into
-   * `staging/www/`, and validate `index.html`. The native layer owns the
-   * "Updating…" overlay (shown on entry, dismissed on failure, left visible on
-   * success for the swap slice). Non-blocking: the WebView already rendered
+   * Drive the native `prepareUpdate` → `applyUpdate` pipeline (issues 06 + 07).
+   * `prepareUpdate` downloads/unzips/validates into `staging/www/` and shows
+   * the "Updating…" overlay; `applyUpdate` atomically rotates staging into
+   * `current/`, the old current into `previous/`, and writes `state.json`,
+   * then dismisses the overlay. Non-blocking: the WebView already rendered
    * its current bundle before this runs. Guarded by {@link preparing} so a
    * foreground-resume can't double-trigger over an in-flight cold-launch
    * staging pass.
+   *
+   * After a successful swap the WebView is NOT reloaded yet (issue 08 owns
+   * that), so the screen still shows the old build number even though
+   * `state.current` now reflects the new one. The status line surfaces this.
    */
-  private async prepareUpdate(url: string): Promise<void> {
+  private async prepareUpdate(url: string, version: number): Promise<void> {
     if (this.preparing()) {
       return;
     }
     this.preparing.set(true);
     try {
-      const result = await LiveUpdate.prepareUpdate({ url });
-      // On success the native overlay stays up; the atomic-swap slice (issue
-      // 07) will dismiss it after reloading. Surface the staged path for
-      // debugging (visible only once a later slice dismisses the overlay).
-      this.status.set(`staged bundle at ${result.stagingPath} — awaiting swap`);
-    } catch (err) {
-      // prepareUpdate already cleaned up staging + dismissed the overlay on
-      // the native side; just surface the failure.
+      const staged = await LiveUpdate.prepareUpdate({ url });
+      // Overlay is still up; hand off to the atomic swap (issue 07).
+      this.status.set(
+        `staged build ${version} at ${staged.stagingPath} — swapping…`,
+      );
+
+      const newState = await LiveUpdate.applyUpdate({ version });
+      this.canRollBack.set(newState.previous !== null);
+      // The update is no longer "available" — it has been applied (just
+      // awaiting the WebView reload, which is issue 08).
       this.updateAvailable.set(false);
-      this.status.set(`prepareUpdate failed: ${stringifyError(err)}`);
+      this.status.set(
+        `applied build ${newState.current}` +
+          (newState.previous !== null
+            ? ` (previous: ${newState.previous}) — awaiting reload`
+            : ' — awaiting reload'),
+      );
+    } catch (err) {
+      // prepareUpdate/applyUpdate already cleaned up + dismissed the overlay
+      // on the native side; just surface the failure. The active bundle is
+      // unchanged on any error path.
+      this.updateAvailable.set(false);
+      this.status.set(`applyUpdate failed: ${stringifyError(err)}`);
     } finally {
       this.preparing.set(false);
     }
@@ -237,7 +255,7 @@ export class AppComponent implements OnInit, OnDestroy {
       // visible (handed off to the atomic-swap slice, issue 07), on failure
       // it is dismissed and nothing is mutated.
       if (result.updateAvailable) {
-        void this.prepareUpdate(result.url);
+        void this.prepareUpdate(result.url, result.serverVersion);
       }
     } catch (err) {
       const msg = `${source} check failed: ${stringifyError(err)}`;

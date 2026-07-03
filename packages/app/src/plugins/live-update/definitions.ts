@@ -57,6 +57,16 @@ export interface PrepareUpdateResult {
   stagingPath: string;
 }
 
+/** Options for {@link LiveUpdatePlugin.applyUpdate}. */
+export interface ApplyUpdateOptions {
+  /**
+   * The build number being promoted to active — the `serverVersion` that
+   * {@link LiveUpdatePlugin.checkForUpdate} returned. Written verbatim into
+   * `state.current`; `state.previous` becomes whatever the old current was.
+   */
+  version: number;
+}
+
 /**
  * TypeScript contract for the inlined native `LiveUpdatePlugin` Swift class
  * (see `packages/app/live-update-plugin/ios/Sources/LiveUpdatePlugin/LiveUpdatePlugin.swift`).
@@ -65,8 +75,12 @@ export interface PrepareUpdateResult {
  *   - issue 04: on-device state (`ensureStorage`, `getState`) + version check
  *     (`checkForUpdate`).
  *   - issue 06: `prepareUpdate` — download/unzip/validate-to-staging with an
- *     "Updating…" overlay. The atomic swap, WebView reload, and rollback
- *     arrive in later issues.
+ *     "Updating…" overlay. The atomic swap's directory moves are issue 07; the
+ *     WebView reload is issue 08; rollback is issue 09.
+ *   - issue 07: `applyUpdate` — atomically swap the staged bundle into
+ *     `current/`, rotate the old current into `previous/`, and update
+ *     `state.json`. Dismisses the overlay on completion (success or failure).
+ *     Does NOT reload the WebView — that is issue 08.
  */
 export interface LiveUpdatePlugin {
   /** Ensure the storage layout + initial `state.json` exist. */
@@ -77,9 +91,18 @@ export interface LiveUpdatePlugin {
   checkForUpdate(options: CheckForUpdateOptions): Promise<CheckForUpdateResult>;
   /**
    * Download + unzip + validate a payload zip into `staging/www/`, showing an
-   * "Updating…" overlay over the WebView. Does NOT swap or reload — those are
-   * later slices. On failure the overlay is dismissed and nothing is mutated.
-   * On success the overlay stays visible (handed off to the swap slice).
+   * "Updating…" overlay over the WebView. Does NOT swap or reload. On failure
+   * the overlay is dismissed and nothing is mutated. On success the overlay
+   * stays visible (handed off to {@link LiveUpdatePlugin.applyUpdate}).
    */
   prepareUpdate(options: PrepareUpdateOptions): Promise<PrepareUpdateResult>;
+  /**
+   * Atomically promote the staged bundle into `current/`, rotate the old
+   * current into `previous/`, and write `state.json`. Dismisses the
+   * "Updating…" overlay on completion (success or failure). Does NOT reload
+   * the WebView — the app still shows the old version on screen after a
+   * successful swap; the reload arrives in issue 08. On any failure the
+   * active bundle pointer is left unchanged.
+   */
+  applyUpdate(options: ApplyUpdateOptions): Promise<LiveUpdateState>;
 }

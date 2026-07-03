@@ -18,6 +18,7 @@ import type { LiveUpdatePlugin } from './definitions';
 export const LiveUpdate = registerPlugin<LiveUpdatePlugin>('LiveUpdate');
 
 export type {
+  ApplyUpdateOptions,
   CheckForUpdateOptions,
   CheckForUpdateResult,
   LiveUpdatePlugin,

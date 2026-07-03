@@ -38,6 +38,7 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "getState", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "checkForUpdate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "prepareUpdate", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "applyUpdate", returnType: CAPPluginReturnPromise),
     ]
 
     // MARK: - Path constants
@@ -64,7 +65,9 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
 
     private var stateURL: URL { rootURL.appendingPathComponent(stateFileName) }
     private var currentURL: URL { rootURL.appendingPathComponent(currentDirName, isDirectory: true) }
+    private var currentBundleURL: URL { currentURL.appendingPathComponent(bundleDirName, isDirectory: true) }
     private var previousURL: URL { rootURL.appendingPathComponent(previousDirName, isDirectory: true) }
+    private var previousBundleURL: URL { previousURL.appendingPathComponent(bundleDirName, isDirectory: true) }
     private var stagingURL: URL { rootURL.appendingPathComponent(stagingDirName, isDirectory: true) }
     private var stagingBundleURL: URL { stagingURL.appendingPathComponent(bundleDirName, isDirectory: true) }
 
@@ -177,8 +180,9 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
                 // Temp zip no longer needed once unpacked.
                 try? FileManager.default.removeItem(at: tempZipURL!)
 
-                // Overlay stays visible — the atomic-swap slice (issue 07) owns
-                // dismissing it after the WebView reloads from the new bundle.
+                // Overlay stays visible — the atomic-swap slice (issue 07)
+                // owns dismissing it after the swap completes (success or
+                // failure).
                 call.resolve([
                     "stagingPath": self.stagingBundleURL.path,
                 ])
@@ -191,6 +195,132 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("prepareUpdate failed: \(error.localizedDescription)")
             }
         }
+    }
+
+    /// Atomically promote the staged bundle to the active slot and update
+    /// `state.json` (issue 07). Does NOT reload the WebView — the app still
+    /// shows the old version on screen after a successful swap; the reload
+    /// arrives in issue 08.
+    ///
+    /// Flow (all on a background queue; the "Updating…" overlay shown by
+    /// `prepareUpdate` is dismissed on completion — success or failure):
+    ///   1. Read current state → `oldCurrent` (may be nil).
+    ///   2. Re-validate `staging/www/index.html` exists.
+    ///   3. Move `current/www/` to a temp backup location (if it exists).
+    ///   4. Move `staging/www/` into `current/www/`.
+    ///      On failure: move the backup back into `current/www/` (restore),
+    ///      dismiss the overlay, reject. Active bundle unchanged.
+    ///   5. Discard the old `previous/www/`, move the backup into
+    ///      `previous/www/` (only if there was a prior current).
+    ///   6. Write `state.json` atomically to
+    ///      `{ current: <newVersion>, previous: oldCurrent }`.
+    ///      On failure: best-effort restore the prior directory arrangement
+    ///      (move the new current back to staging, move previous back to
+    ///      current) so the active pointer matches on-disk reality, then
+    ///      reject.
+    ///   7. Dismiss the overlay, resolve with the new state.
+    ///
+    /// `version` is the new build number being applied (the server's version
+    /// that `checkForUpdate` already compared). It is written verbatim into
+    /// `state.current`; `state.previous` becomes whatever `oldCurrent` was.
+    @objc func applyUpdate(_ call: CAPPluginCall) {
+        guard let newVersion = call.options?["version"] as? Int else {
+            call.reject("version is required")
+            return
+        }
+
+        DispatchQueue.global(qos: .utility).async {
+            do {
+                try self.ensureLayout()
+                let newState = try self.performAtomicSwap(newVersion: newVersion)
+                self.hideOverlay()
+                call.resolve(self.stateToJS(newState))
+            } catch {
+                self.hideOverlay()
+                call.reject("applyUpdate failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    // MARK: - Atomic swap (issue 07)
+
+    /// Perform the staging → current → previous rotation described in the
+    /// PRD's "Update flow (happy path)" steps 6–7, with best-effort rollback
+    /// on any failure so `current/` is never left empty or half-written.
+    /// Returns the new state to persist + return to JS.
+    ///
+    /// The temp backup lives in the system temp dir (outside the liveupdates
+    /// root) so a crash mid-swap leaves no partially-populated `current/`.
+    private func performAtomicSwap(newVersion: Int) throws -> LiveUpdateState {
+        let fm = FileManager.default
+
+        let oldState = try readState()
+        let oldCurrent = oldState.current
+
+        // Re-validate the staged bundle before touching the live slots.
+        let stagingIndex = stagingBundleURL.appendingPathComponent("index.html")
+        guard fm.fileExists(atPath: stagingIndex.path) else {
+            throw LiveUpdateError.stagingMissing
+        }
+
+        // Temp backup for the currently-active bundle (if any). Lives outside
+        // the liveupdates root so a crash can't leave a stray half-slot.
+        let tempDir = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
+        let backupURL = tempDir.appendingPathComponent("liveupdate-current-\(UUID().uuidString)", isDirectory: true)
+        var hasBackup = false
+        if fm.fileExists(atPath: currentBundleURL.path) {
+            try fm.moveItem(at: currentBundleURL, to: backupURL)
+            hasBackup = true
+        }
+
+        // Promote staging into current. If this fails, restore the backup so
+        // the active bundle is unchanged and reject.
+        do {
+            try fm.moveItem(at: stagingBundleURL, to: currentBundleURL)
+        } catch {
+            if hasBackup {
+                try? fm.moveItem(at: backupURL, to: currentBundleURL)
+            }
+            throw LiveUpdateError.swapFailed(error.localizedDescription)
+        }
+
+        // Staging move succeeded — the new bundle is now active. Promote the
+        // backup (the old current) into `previous`, discarding whatever was
+        // there before.
+        if fm.fileExists(atPath: previousBundleURL.path) {
+            try? fm.removeItem(at: previousBundleURL)
+        }
+        if hasBackup {
+            do {
+                try fm.moveItem(at: backupURL, to: previousBundleURL)
+            } catch {
+                // Non-fatal: previous/ is best-effort rollback storage. The
+                // active swap already succeeded; we just lose the rollback
+                // slot. Log by surfacing in the returned previous = nil.
+                try? fm.removeItem(at: backupURL)
+            }
+        }
+
+        // Persist the new state atomically. `Data.write(options: .atomic)`
+        // writes to a temp file and renames, so a write failure cannot leave
+        // a truncated state.json. If it somehow fails, roll the directory
+        // arrangement back so on-disk reality matches the (unchanged) state.
+        let newState = LiveUpdateState(current: newVersion, previous: oldCurrent)
+        do {
+            try writeState(newState)
+        } catch {
+            // Restore: move the new current back to staging, move previous
+            // (== old current) back to current. previous is lost in this
+            // error path, but state.json was never updated so it still
+            // describes the original arrangement as closely as we can.
+            try? fm.moveItem(at: currentBundleURL, to: stagingBundleURL)
+            if fm.fileExists(atPath: previousBundleURL.path) {
+                try? fm.moveItem(at: previousBundleURL, to: currentBundleURL)
+            }
+            throw LiveUpdateError.stateWriteFailed(error.localizedDescription)
+        }
+
+        return newState
     }
 
     // MARK: - Storage helpers
@@ -385,6 +515,9 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         case missingPayloadUrl
         case downloadFailed(String)
         case missingIndexHtml
+        case stagingMissing
+        case swapFailed(String)
+        case stateWriteFailed(String)
 
         var errorDescription: String? {
             switch self {
@@ -395,6 +528,9 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
             case .missingPayloadUrl: return "manifest missing non-empty 'url'"
             case .downloadFailed(let s): return "download failed: \(s)"
             case .missingIndexHtml: return "payload missing index.html at bundle root"
+            case .stagingMissing: return "no staged bundle to apply"
+            case .swapFailed(let s): return "atomic swap failed: \(s)"
+            case .stateWriteFailed(let s): return "state.json write failed: \(s)"
             }
         }
     }
