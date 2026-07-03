@@ -12,6 +12,7 @@
     "test": "pnpm -r test",
     "lint": "pnpm -r lint",
     "dev:app": "pnpm --filter @ionic-update-poc/app dev",
-    "dev:server": "pnpm --filter @ionic-update-poc/server dev"
+    "dev:server": "pnpm --filter @ionic-update-poc/server dev",
+    "publish:payload": "node scripts/publish.mjs"
   }
 }

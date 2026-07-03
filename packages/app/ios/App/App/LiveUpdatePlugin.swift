@@ -360,35 +360,46 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         let previousExistedBefore = FileManager.default.fileExists(atPath: self.previousDir.path)
         let currentExistedBefore = FileManager.default.fileExists(atPath: self.currentDir.path)
 
+        // Track which destructive steps completed so the catch handler can
+        // correctly roll back only what was actually changed.
+        var movedCurrentToPrevious = false
+
         // Clean any leftover backup from a prior failed attempt
         self.cleanupBackup()
 
         do {
-            // 4. Remove existing previous/ (to be replaced by the old current/)
-            if previousExistedBefore {
-                try FileManager.default.removeItem(at: self.previousDir)
-            }
-
-            // 5. If current/ exists and has content, move it to previous/ for rollback.
-            //    On first update current/ is empty (just a placeholder), so previous/
-            //    stays empty — rollback will fall back to the app bundle.
+            // 4. Move existing current/ to a temp directory first so that a
+            //    failure in step 5 (remove previous/) cannot orphan the active
+            //    bundle or cause the catch handler to restore incorrectly.
+            let tmpDir = liveUpdatesRoot.appendingPathComponent(".swap_tmp", isDirectory: true)
             if currentExistedBefore {
                 let currentContents = (try? FileManager.default.contentsOfDirectory(at: self.currentDir, includingPropertiesForKeys: nil)) ?? []
                 if !currentContents.isEmpty {
-                    try FileManager.default.moveItem(at: self.currentDir, to: self.previousDir)
+                    try FileManager.default.moveItem(at: self.currentDir, to: tmpDir)
+                    movedCurrentToPrevious = true
                 } else {
                     // Empty placeholder — just remove it
                     try FileManager.default.removeItem(at: self.currentDir)
                 }
             }
 
-            // 6. Create fresh current/www/
+            // 5. Remove existing previous/ (to be replaced by the old current/)
+            if previousExistedBefore {
+                try FileManager.default.removeItem(at: self.previousDir)
+            }
+
+            // 6. Move tmp (old current) → previous/
+            if movedCurrentToPrevious {
+                try FileManager.default.moveItem(at: tmpDir, to: self.previousDir)
+            }
+
+            // 7. Create fresh current/www/
             try self.createDirectoryIfNeeded(self.currentWwwDir)
 
-            // 7. Move staged content into current/www/
+            // 8. Move staged content into current/www/
             try self.moveContentsOfDirectory(from: stagedRoot, to: self.currentWwwDir)
 
-            // 8. Update state.json — always record previousVersion so rollback is available
+            // 9. Update state.json — always record previousVersion so rollback is available
             let state: [String: Any?] = [
                 "current": version,
                 "previous": previousVersion,
@@ -396,9 +407,8 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
             let data = try JSONSerialization.data(withJSONObject: state, options: [.prettyPrinted, .sortedKeys])
             try data.write(to: self.stateFile, options: .atomic)
 
-            // 9. Clean up staging
+            // 10. Clean up staging
             self.cleanupStaging()
-            self.cleanupBackup()
 
             NSLog("[LiveUpdate] Swap complete: current=v%d, previous=v%d", version, previousVersion)
             call.resolve([
@@ -409,19 +419,35 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         } catch {
             NSLog("[LiveUpdate] Swap failed, restoring: %@", error.localizedDescription)
 
-            // Restore: if we moved current → previous, move it back
-            if currentExistedBefore && FileManager.default.fileExists(atPath: self.previousDir.path) {
+            // Restore: only if we already moved current/ out, move it back.
+            // The old current/ may be in .swap_tmp (step 4) or in previous/
+            // (if step 6 already moved it there).
+            if movedCurrentToPrevious {
+                let tmpDir = liveUpdatesRoot.appendingPathComponent(".swap_tmp", isDirectory: true)
+
                 // Remove the partially-constructed current/ if it exists
                 if FileManager.default.fileExists(atPath: self.currentDir.path) {
                     try? FileManager.default.removeItem(at: self.currentDir)
                 }
-                // Move previous/ back to current/
-                try? FileManager.default.moveItem(at: self.previousDir, to: self.currentDir)
+
+                if FileManager.default.fileExists(atPath: tmpDir.path) {
+                    // Step 6 hasn't run yet — old current is still in tmp
+                    try? FileManager.default.moveItem(at: tmpDir, to: self.currentDir)
+                } else if FileManager.default.fileExists(atPath: self.previousDir.path) {
+                    // Step 6 already ran — old current was moved to previous/
+                    try? FileManager.default.moveItem(at: self.previousDir, to: self.currentDir)
+                }
+
+                // Clean up any leftover tmp
+                if FileManager.default.fileExists(atPath: tmpDir.path) {
+                    try? FileManager.default.removeItem(at: tmpDir)
+                }
             }
 
-            // Restore state.json if we have a backup (best-effort for POC)
+            // state.json was never written (or .atomic preserved the original),
+            // so the on-disk record is still consistent with the restored layout.
+
             self.cleanupStaging()
-            self.cleanupBackup()
 
             call.resolve([
                 "success": false,
@@ -635,9 +661,9 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
-    /// Remove the temporary swap backup directory.
+    /// Remove the temporary swap directory used by swapToStagedUpdate and rollback.
     private func cleanupBackup() {
-        let backup = liveUpdatesRoot.appendingPathComponent(".swap_backup", isDirectory: true)
+        let backup = liveUpdatesRoot.appendingPathComponent(".swap_tmp", isDirectory: true)
         if FileManager.default.fileExists(atPath: backup.path) {
             try? FileManager.default.removeItem(at: backup)
         }

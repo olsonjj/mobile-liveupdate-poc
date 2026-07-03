@@ -8,5 +8,5 @@ export const BUILD = {
   /** Monotonically increasing integer build number. */
   number: 1,
   /** Greeting displayed on screen to identify which bundle is active. */
-  greeting: 'Hello World',
+  greeting: 'Hello Third First',
 } as const;

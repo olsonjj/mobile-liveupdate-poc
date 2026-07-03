@@ -80,11 +80,41 @@ pnpm install
 Root convenience scripts orchestrate the workspaces:
 
 ```sh
-pnpm dev:server   # start the Fastify server (later slice)
-pnpm dev:app      # run the Ionic app (later slice)
+pnpm dev:server   # start the Fastify server (default port 3000)
+pnpm dev:app      # run the Ionic dev server
 pnpm build        # build all workspaces
 pnpm test         # run tests across all workspaces
+pnpm publish:payload   # publish a new payload (see below)
 ```
+
+### Publishing a new payload
+
+The publish workflow is semi-automated:
+
+1. **Bump the version** — edit `packages/app/src/app/version.ts`, increment
+   `BUILD.number` and optionally update `BUILD.greeting`.
+2. **Publish** — run `pnpm publish:payload` from the project root. This:
+   - Runs the Angular production build (`ng build --configuration production`)
+   - Zips the `www/` output with `zip -0` (store-only, required by the
+     Swift unzipper)
+   - Copies the zip into `packages/server/payloads/build-{N}.zip`
+   - Rewrites `packages/server/manifest.json` with the new version, URL, and
+     timestamp
+
+   If the server is not running on `http://localhost:3000`, set the
+   `SERVER_URL` environment variable:
+   ```sh
+   SERVER_URL=http://192.168.1.100:3000 pnpm publish:payload
+   ```
+
+3. **Restart the server** (if it's already running) so it picks up the new
+   `manifest.json`.
+
+4. **Bring the app to the foreground** — the app will detect the new version
+   on its next foreground check, download the zip, swap, and reload.
+
+The full manual publish workflow is documented in `PRD.md` (publish workflow
+section). The `pnpm publish:payload` command automates steps 2–5 of that workflow.
 
 ## Definition of done (POC)
 
@@ -97,3 +127,43 @@ build N running.
 
 See `PRD.md` for the full problem statement, solution, user stories, and
 implementation decisions.
+
+## Error-path hardening
+
+Every failure mode during the update process has been designed to leave the
+active bundle pointer untouched and the app running the previously active
+bundle. The table below documents each error scenario and the observed behaviour.
+
+| Failure mode | Active bundle behaviour | `state.json` / `current/` |
+|---|---|---|
+| Corrupt or incomplete zip download (network error, non-200, zero-length) | App keeps running the current bundle. The download temp file is discarded | Unchanged — `downloadAndStageUpdate` never touches `current/` or `state.json` |
+| Zip unzips successfully but is missing `index.html` | App keeps running the current bundle. Staging directory is cleaned up | Unchanged — validation rejects the bundle before any swap is attempted |
+| Failure during directory move in `swapToStagedUpdate` | App keeps running the current bundle. The old `current/` is restored from a temp directory (`.swap_tmp`), and any partially-written `current/` is removed | `state.json` is preserved by the `.atomic` write; directories are restored to their pre-swap layout |
+| Failure during `state.json` write | Directories are restored from `.swap_tmp`. The `.atomic` write guarantees the original `state.json` is left intact if the write fails | Preserved — `FileManager.write(…, options: .atomic)` writes to a temp file and renames, so a failure leaves the original unchanged |
+| Rollback failure (directory operations throw mid-swap) | The old `current/` is restored from `.rollback_tmp`. App keeps running | `state.json` is preserved; directories are restored to pre-rollback layout |
+| Rollback with no previous bundle | Nothing happens — the Roll Back button is disabled when `state.previous` is null | Unchanged |
+
+### Error-path design principles
+
+- **Download and staging**: The download/unzip phase happens entirely inside a
+temporary staging directory (`Library/Application Support/liveupdates/staging/`).
+`current/`, `previous/`, and `state.json` are never touched until the staged
+bundle is fully downloaded, unzipped, and validated. A failure at any point in
+this phase simply removes the staging directory and reports the error.
+
+- **Atomic swap with rollback**: Before any destructive operation on `current/`,
+the existing `current/` is moved to a temp directory (`.swap_tmp`). Only after the
+move succeeds are `previous/` and `current/` reshuffled. If any subsequent step
+fails, the catch handler moves `.swap_tmp` back to `current/`, ensuring the active
+bundle directory is restored.
+
+- **Transactionally-safe state writes**: All `state.json` writes use
+`Data.write(to:options: .atomic)`, which writes to a temporary file and atomically
+renames it. This means the write either fully succeeds or the original file is
+preserved — there is no window where `state.json` contains a partial or corrupt
+record.
+
+- **Rollback uses the same temp-dir pattern**: The rollback method mirrors the swap
+pattern — it moves `current/` to `.rollback_tmp` before shuffling directories.
+If anything fails, `.rollback_tmp` is moved back to `current/`, preserving the
+active bundle.
