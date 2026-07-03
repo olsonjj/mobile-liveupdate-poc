@@ -33,25 +33,37 @@ import { GREETING, VERSION } from '../version';
     <ion-app>
       <ion-header>
         <ion-toolbar>
-          <ion-title>Live Updates POC</ion-title>
+          <ion-title>Live Updates</ion-title>
         </ion-toolbar>
       </ion-header>
       <ion-content class="ion-padding">
-        <div class="version-line">Build: {{ version }}</div>
-        <div class="greeting-line">{{ greeting }}</div>
-        <ion-button (click)="onRollBack()" [disabled]="!canRollBack()">
-          Roll Back
-        </ion-button>
-        @if (updateAvailable()) {
-          <div class="update-badge">
-            <ion-badge color="warning">
-              Update available — build {{ serverVersion() }}
-            </ion-badge>
+        <div class="screen">
+          <div class="build-card">
+            <div class="build-label">Build</div>
+            <div class="build-number">{{ version }}</div>
           </div>
-        }
-        @if (status()) {
-          <div class="status-line">{{ status() }}</div>
-        }
+          <div class="greeting">{{ greeting }}</div>
+          <ion-button
+            class="rollback-button"
+            fill="outline"
+            color="medium"
+            expand="block"
+            (click)="onRollBack()"
+            [disabled]="!canRollBack()"
+          >
+            Roll Back
+          </ion-button>
+          @if (updateAvailable()) {
+            <div class="update-banner">
+              <ion-badge color="warning">
+                Update available — build {{ serverVersion() }}
+              </ion-badge>
+            </div>
+          }
+          @if (status()) {
+            <div class="status-line">{{ status() }}</div>
+          }
+        </div>
       </ion-content>
     </ion-app>
   `,
@@ -61,27 +73,67 @@ import { GREETING, VERSION } from '../version';
         display: block;
         height: 100%;
       }
-      .version-line {
-        font-size: 1.5rem;
+      .screen {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 1.25rem;
+        max-width: 30rem;
+        margin: 0 auto;
+        padding-top: 2.5rem;
+      }
+      .build-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 0.25rem;
+        width: 100%;
+        padding: 1.75rem 1rem;
+        border-radius: 1rem;
+        background: var(--build-card-bg, #f5f7fa);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+      }
+      .build-label {
+        font-size: 0.8rem;
         font-weight: 600;
-        margin-bottom: 0.25rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--ion-color-medium, #6b6b6b);
       }
-      .greeting-line {
-        font-size: 1.25rem;
-        margin-bottom: 1.5rem;
+      .build-number {
+        font-size: 3.25rem;
+        font-weight: 700;
+        line-height: 1;
+        color: var(--ion-text-color, #1a1a1a);
+        font-variant-numeric: tabular-nums;
       }
-      .update-badge {
-        margin-top: 1rem;
+      .greeting {
+        font-size: 1.15rem;
+        font-weight: 500;
+        text-align: center;
+        color: var(--ion-text-color, #1a1a1a);
       }
-      .update-badge ion-badge {
-        font-size: 0.9rem;
+      .rollback-button {
+        width: 100%;
+        max-width: 18rem;
+      }
+      .update-banner {
+        margin-top: 0.25rem;
+      }
+      .update-banner ion-badge {
+        font-size: 0.85rem;
+        font-weight: 600;
+        padding: 0.4rem 0.75rem;
+        border-radius: 0.5rem;
       }
       .status-line {
-        margin-top: 1.5rem;
-        font-size: 0.95rem;
-        color: var(--ion-color-medium, #6b6b6b);
-        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        margin-top: 0.5rem;
+        font-size: 0.85rem;
+        line-height: 1.4;
+        text-align: center;
         word-break: break-word;
+        max-width: 24rem;
+        color: var(--ion-color-medium, #6b6b6b);
       }
     `,
   ],

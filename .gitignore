@@ -9,8 +9,10 @@ build/
 # Angular CLI cache
 .angular/
 
-# Screenshots (throwaway simulator verification artifacts)
-screenshots/
+# Screenshots (throwaway simulator verification artifacts — only the
+# README example image is tracked, the rest stay local)
+screenshots/*
+!screenshots/app-home.png
 
 # Capacitor / iOS
 packages/app/ios/App/App/output/
