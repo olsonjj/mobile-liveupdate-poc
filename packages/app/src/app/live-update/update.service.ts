@@ -1,8 +1,11 @@
-import { Injectable, NgZone } from '@angular/core';
+import { Injectable, NgZone, OnDestroy } from '@angular/core';
 import { BehaviorSubject, Observable } from 'rxjs';
+import { App } from '@capacitor/app';
+import type { PluginListenerHandle } from '@capacitor/core';
 import LiveUpdate from './plugin';
 import type { CheckResult, GetStateResult } from './types';
 import { BUILD } from '../version';
+import { environment } from '../../environments/environment';
 
 /**
  * Application-level service that wraps the LiveUpdate Capacitor plugin.
@@ -11,7 +14,7 @@ import { BUILD } from '../version';
  * and update availability without polling.
  */
 @Injectable({ providedIn: 'root' })
-export class UpdateService {
+export class UpdateService implements OnDestroy {
   // ── Reactive state ────────────────────────────────────────────────
   private readonly checkResult = new BehaviorSubject<CheckResult | null>(null);
   private readonly state = new BehaviorSubject<GetStateResult | null>(null);
@@ -24,8 +27,11 @@ export class UpdateService {
   readonly state$: Observable<GetStateResult | null> =
     this.state.asObservable();
 
-  /** Server base URL — kept in one place for easy reconfiguration. */
-  private readonly serverUrl = 'http://localhost:3000';
+  /** Server base URL, from environment config. */
+  private readonly serverUrl = environment.serverUrl;
+
+  /** Handle for the Capacitor appStateChange listener, removed on destroy. */
+  private appStateHandle: PluginListenerHandle | null = null;
 
   constructor(private readonly ngZone: NgZone) {}
 
@@ -77,6 +83,41 @@ export class UpdateService {
     const s = await LiveUpdate.getState();
     this.ngZone.run(() => this.state.next(s));
     return s;
+  }
+
+  // ── Foreground resume listener ─────────────────────────────────────
+
+  /**
+   * Register a Capacitor appStateChange listener so that the version
+   * check fires every time the app returns to the foreground (resume).
+   *
+   * The check is non-blocking and silent — no overlay, no download.
+   * If an update is available the UI reactively shows the indicator
+   * via the checkResult$ observable.
+   */
+  async startForegroundListener(): Promise<void> {
+    // Remove any previous listener to avoid duplicates
+    if (this.appStateHandle) {
+      await this.appStateHandle.remove();
+    }
+
+    this.appStateHandle = await App.addListener('appStateChange', (state) => {
+      if (state.isActive) {
+        // App has returned to the foreground — run a silent version check
+        this.performCheck().catch((err) =>
+          console.warn('[LiveUpdate] foreground check failed:', err),
+        );
+      }
+    });
+  }
+
+  // ── Lifecycle ──────────────────────────────────────────────────────
+
+  async ngOnDestroy(): Promise<void> {
+    if (this.appStateHandle) {
+      await this.appStateHandle.remove();
+      this.appStateHandle = null;
+    }
   }
 
   /** Snapshot of the latest check result (null if never checked). */

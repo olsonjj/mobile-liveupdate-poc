@@ -16,5 +16,14 @@ export class AppComponent implements OnInit {
     this.updateService.initialize().catch((err) => {
       console.warn('[AppComponent] UpdateService initialization error:', err);
     });
+
+    // Register foreground resume listener so the version check also fires
+    // when the app returns to the foreground (not only on cold launch).
+    this.updateService.startForegroundListener().catch((err) => {
+      console.warn(
+        '[AppComponent] Failed to start foreground listener:',
+        err,
+      );
+    });
   }
 }

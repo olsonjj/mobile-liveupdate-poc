@@ -3,7 +3,15 @@
 // The list of file replacements can be found in `angular.json`.
 
 export const environment = {
-  production: false
+  production: false,
+
+  /**
+   * Server base URL for the live-update manifest API.
+   *
+   * iOS 26+ simulators have their own network namespace,
+   * so use the host Mac's LAN IP (e.g. 192.168.x.x), not localhost.
+   */
+  serverUrl: 'http://192.168.182.147:3000',
 };
 
 /*

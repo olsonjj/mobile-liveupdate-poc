@@ -11,9 +11,10 @@
     "watch": "ng build --watch --configuration development",
     "test": "ng test",
     "lint": "ng lint",
-    "cap:sync": "npx cap sync",
+    "cap:sync": "npx cap sync && node scripts/patch-capacitor-config.mjs",
     "cap:add:ios": "npx cap add ios",
-    "cap:open:ios": "npx cap open ios"
+    "cap:open:ios": "npx cap open ios",
+    "cap:run:ios": "npx cap sync && node scripts/patch-capacitor-config.mjs && npx cap run ios --no-sync"
   },
   "dependencies": {
     "@angular/animations": "20.3.25",

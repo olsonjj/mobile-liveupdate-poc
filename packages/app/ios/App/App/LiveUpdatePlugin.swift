@@ -70,10 +70,10 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
             let data = try Data(contentsOf: stateFile)
             let json = try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
 
-            let current = json["current"] as? Int ?? NSNull()
-            let previous = json["previous"] as? Int ?? NSNull()
-
-            call.resolve(["current": current, "previous": previous])
+            var result: [String: Any] = ["current": NSNull(), "previous": NSNull()]
+            if let current = json["current"] as? Int { result["current"] = current }
+            if let previous = json["previous"] as? Int { result["previous"] = previous }
+            call.resolve(result)
         } catch {
             call.reject("Failed to read state: \(error.localizedDescription)")
         }
