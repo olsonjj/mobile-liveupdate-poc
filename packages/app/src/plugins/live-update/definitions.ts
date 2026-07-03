@@ -67,6 +67,16 @@ export interface ApplyUpdateOptions {
   version: number;
 }
 
+/** Result of {@link LiveUpdatePlugin.reload}. */
+export interface ReloadResult {
+  /**
+   * Absolute on-device path the WebView was re-pointed at
+   * (`…/liveupdates/current/www/`), for debugging via
+   * `xcrun simctl get_app_container`.
+   */
+  path: string;
+}
+
 /**
  * TypeScript contract for the inlined native `LiveUpdatePlugin` Swift class
  * (see `packages/app/live-update-plugin/ios/Sources/LiveUpdatePlugin/LiveUpdatePlugin.swift`).
@@ -81,6 +91,12 @@ export interface ApplyUpdateOptions {
  *     `current/`, rotate the old current into `previous/`, and update
  *     `state.json`. Dismisses the overlay on completion (success or failure).
  *     Does NOT reload the WebView — that is issue 08.
+ *   - issue 08 (this slice): `reload` — re-point the Capacitor WebView at the
+ *     writable active bundle (`current/www/index.html`) via
+ *     `CAPBridgeProtocol.setServerBasePath(_:)` (PRD approach 9a). The bridge
+ *     re-serves `index.html` + all assets from the new path and the WebView
+ *     reloads, so the user sees the updated build number + greeting. No
+ *     `CAPBridge` subclassing required. Reused by the rollback flow (issue 09).
  */
 export interface LiveUpdatePlugin {
   /** Ensure the storage layout + initial `state.json` exist. */
@@ -105,4 +121,15 @@ export interface LiveUpdatePlugin {
    * active bundle pointer is left unchanged.
    */
   applyUpdate(options: ApplyUpdateOptions): Promise<LiveUpdateState>;
+  /**
+   * Re-point the Capacitor WebView at the active bundle at
+   * `current/www/index.html` and reload it (PRD approach 9a, issue 08).
+   * Implemented via `CAPBridgeProtocol.setServerBasePath(_:)`, which updates
+   * the bridge's `WebViewAssetHandler` asset path and reloads the WebView to
+   * its local URL so `index.html` + all assets are served from the writable
+   * `current/www/` directory. Validates `index.html` exists first; on failure
+   * rejects and leaves the WebView on its current bundle. The active bundle
+   * pointer in `state.json` is never changed here. Reused by rollback (09).
+   */
+  reload(): Promise<ReloadResult>;
 }

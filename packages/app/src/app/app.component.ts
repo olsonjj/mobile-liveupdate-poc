@@ -167,18 +167,20 @@ export class AppComponent implements OnInit, OnDestroy {
   // MARK: - Download / unzip / validate to staging (issue 06)
 
   /**
-   * Drive the native `prepareUpdate` → `applyUpdate` pipeline (issues 06 + 07).
-   * `prepareUpdate` downloads/unzips/validates into `staging/www/` and shows
-   * the "Updating…" overlay; `applyUpdate` atomically rotates staging into
-   * `current/`, the old current into `previous/`, and writes `state.json`,
-   * then dismisses the overlay. Non-blocking: the WebView already rendered
-   * its current bundle before this runs. Guarded by {@link preparing} so a
-   * foreground-resume can't double-trigger over an in-flight cold-launch
-   * staging pass.
+   * Drive the native `prepareUpdate` → `applyUpdate` → `reload` pipeline
+   * (issues 06 + 07 + 08). `prepareUpdate` downloads/unzips/validates into
+   * `staging/www/` and shows the "Updating…" overlay; `applyUpdate` atomically
+   * rotates staging into `current/`, the old current into `previous/`, and
+   * writes `state.json`, then dismisses the overlay; `reload` re-points the
+   * Capacitor WebView at the newly-active `current/www/` (approach 9a) so the
+   * user sees the updated build number + greeting. Non-blocking: the WebView
+   * already rendered its current bundle before this runs. Guarded by
+   * {@link preparing} so a foreground-resume can't double-trigger over an
+   * in-flight cold-launch staging pass.
    *
-   * After a successful swap the WebView is NOT reloaded yet (issue 08 owns
-   * that), so the screen still shows the old build number even though
-   * `state.current` now reflects the new one. The status line surfaces this.
+   * `reload()` tears down the current JS context as the WebView navigates to
+   * the new bundle, so nothing after it is reliable — it is called last, and
+   * the reloaded bundle's own `ngOnInit` takes over (running a fresh check).
    */
   private async prepareUpdate(url: string, version: number): Promise<void> {
     if (this.preparing()) {
@@ -194,15 +196,31 @@ export class AppComponent implements OnInit, OnDestroy {
 
       const newState = await LiveUpdate.applyUpdate({ version });
       this.canRollBack.set(newState.previous !== null);
-      // The update is no longer "available" — it has been applied (just
-      // awaiting the WebView reload, which is issue 08).
+      // The update is no longer "available" — it has been applied; just the
+      // reload (issue 08) remains.
       this.updateAvailable.set(false);
       this.status.set(
         `applied build ${newState.current}` +
           (newState.previous !== null
-            ? ` (previous: ${newState.previous}) — awaiting reload`
-            : ' — awaiting reload'),
+            ? ` (previous: ${newState.previous})`
+            : '') +
+          ' — reloading…',
       );
+
+      // Issue 08: re-point the WebView at current/www/ and reload. The native
+      // plugin dismisses the overlay as part of the swap; the WebView then
+      // navigates to the new bundle, tearing down this JS context. There may
+      // be a brief flash of the old bundle between overlay-dismiss and the
+      // new bundle painting — acceptable for a POC (documented in the issue
+      // 08 decision note). Anything after this call may not run.
+      try {
+        await LiveUpdate.reload();
+      } catch (err) {
+        // Reload failed (e.g. current/www/index.html missing after a corrupt
+        // state). The active pointer is unchanged; surface the error. The
+        // user stays on the old bundle, which is the safe failure mode.
+        this.status.set(`reload failed: ${stringifyError(err)}`);
+      }
     } catch (err) {
       // prepareUpdate/applyUpdate already cleaned up + dismissed the overlay
       // on the native side; just surface the failure. The active bundle is
@@ -235,6 +253,35 @@ export class AppComponent implements OnInit, OnDestroy {
       await LiveUpdate.ensureStorage();
       const state = await LiveUpdate.getState();
       this.canRollBack.set(state.previous !== null);
+
+      // Cold-launch restore (issue 08): if an update has previously been
+      // applied (`state.current` is non-null) and the running app-bundle's
+      // `VERSION` constant doesn't match it, re-point the WebView at
+      // `current/www/` so the app boots into the previously-applied bundle
+      // rather than the stale app-bundle baseline. Without this, killing &
+      // relaunching the app after an update would silently show the old
+      // app-bundle version again. The reloaded bundle's own `ngOnInit` then
+      // runs the version check against the server. On resume this is skipped
+      // — the running bundle is already the active one.
+      if (
+        source === 'cold' &&
+        state.current !== null &&
+        state.current !== VERSION
+      ) {
+        this.status.set(`restoring applied build ${state.current}…`);
+        try {
+          await LiveUpdate.reload();
+          // The WebView is reloading from current/www/; this JS context is
+          // being torn down. The reloaded bundle's ngOnInit takes over, so
+          // stop here rather than running a duplicate check.
+          return;
+        } catch (err) {
+          // Restore failed (e.g. current/www/index.html missing after a
+          // corrupted state): fall through to a normal check against the
+          // app-bundle baseline. Safe failure mode — app stays on its bundle.
+          this.status.set(`restore failed: ${stringifyError(err)}`);
+        }
+      }
 
       const result = await LiveUpdate.checkForUpdate({
         serverUrl: LIVE_UPDATE_SERVER_URL,

@@ -31,8 +31,12 @@ Capacitor plugin package (`packages/app/live-update-plugin/`, consumed via a
 `checkForUpdate()` non-blocking, surfacing "current: N, server: M, update
 available: yes/no" in the UI. The on-device layout `Library/Application
 Support/liveupdates/{current,previous,state.json}` is created on first launch
-and is inspectable via `xcrun simctl get_app_container`. Download/unzip/swap/
-WebView-reload/manual-rollback arrive in later issues (06–10).
+and is inspectable via `xcrun simctl get_app_container`. The download/unzip
+(06), atomic swap (07), and WebView reload (08) slices are now implemented:
+the full update pipeline runs — `prepareUpdate` → `applyUpdate` → `reload` —
+so publishing build N+1 on the server and foregrounding the app shows the
+"Updating…" overlay followed by a reload displaying build N+1's greeting.
+Rollback (09) and end-to-end hardening (10) remain.
 
 The **foreground-resume trigger** slice is implemented (issue 05): on iOS the
 app subscribes to `@capacitor/app`'s `appStateChange` event and, when the app
@@ -103,6 +107,14 @@ pnpm dev:app      # run the Ionic app (later slice)
 pnpm build        # build all workspaces
 pnpm test         # run tests across all workspaces
 ```
+
+## Decision notes
+
+- [`docs/decisions/08-reload-webview-9a.md`](docs/decisions/08-reload-webview-9a.md)
+  — the WebView is reloaded from the new bundle using Capacitor's
+  `CAPBridgeProtocol.setServerBasePath(_:)` (PRD approach 9a). The fallback
+  runtime-module-swap (9b) is **not** implemented because 9a is feasible
+  with a ~10-line native method and no `CAPBridge` subclassing.
 
 ## Definition of done (POC)
 

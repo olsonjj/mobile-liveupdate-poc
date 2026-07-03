@@ -25,4 +25,5 @@ export type {
   LiveUpdateState,
   PrepareUpdateOptions,
   PrepareUpdateResult,
+  ReloadResult,
 } from './definitions';

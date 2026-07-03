@@ -16,13 +16,25 @@ import Compression
 ///     (`checkForUpdate`).
 ///   - issue 05: foreground-resume trigger is driven from the JS layer; this
 ///     native side is unchanged for that slice.
-///   - issue 06 (this slice): `prepareUpdate` — show an "Updating…" overlay,
-///     download the payload zip to a temp location, unzip it into
-///     `staging/www/`, and validate that an `index.html` exists at the bundle
-///     root. On any failure the staging/temp dirs are cleaned up, the overlay
-///     is dismissed, and `current/` + `state.json` are left untouched. On
-///     success the overlay stays visible and the staged path is returned; the
-///     atomic swap + reload arrive in later slices.
+///   - issue 06: `prepareUpdate` — show an "Updating…" overlay, download the
+///     payload zip to a temp location, unzip it into `staging/www/`, and
+///     validate that an `index.html` exists at the bundle root. On any failure
+///     the staging/temp dirs are cleaned up, the overlay is dismissed, and
+///     `current/` + `state.json` are left untouched. On success the overlay
+///     stays visible and the staged path is returned.
+///   - issue 07: `applyUpdate` — atomically swap the staged bundle into
+///     `current/`, rotate the old current into `previous/`, and update
+///     `state.json`. Dismisses the overlay on completion (success or
+///     failure).
+///   - issue 08 (this slice): `reload` — re-point the Capacitor WebView at the
+///     writable active bundle (`current/www/index.html`) via
+///     `CAPBridgeProtocol.setServerBasePath(_:)` (approach 9a). The bridge's
+///     `WebViewAssetHandler` re-serves `index.html` + all assets from the new
+///     path and the WebView reloads, so the user sees the updated build number
+///     + greeting. No `CAPBridge` subclassing or `WKWebView.loadFileURL`
+///     plumbing is required — this is Capacitor's sanctioned off-road escape
+///     hatch for live updates. Rollback (issue 09) reuses this method after
+///     flipping `current`/`previous`.
 ///
 /// Registration: this class conforms to `CAPBridgedPlugin`; the SPM target is
 /// linked into the app and the bridge instantiates the class because
@@ -39,6 +51,7 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "checkForUpdate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "prepareUpdate", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "applyUpdate", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "reload", returnType: CAPPluginReturnPromise),
     ]
 
     // MARK: - Path constants
@@ -239,6 +252,64 @@ public class LiveUpdatePlugin: CAPPlugin, CAPBridgedPlugin {
                 self.hideOverlay()
                 call.reject("applyUpdate failed: \(error.localizedDescription)")
             }
+        }
+    }
+
+    // MARK: - WebView reload from the active bundle (issue 08)
+
+    /// Re-point the Capacitor WebView at the active bundle directory
+    /// `current/www/` and reload it so the user sees the newly-swapped build
+    /// number + greeting. Implements approach 9a from the PRD.
+    ///
+    /// Capacitor exposes *two* `setServerBasePath` entry points:
+    ///   - `CapacitorBridge.setServerBasePath(_:)` (the `CAPBridgeProtocol`
+    ///     method) only updates `config.appLocation` + the asset handler's asset
+    ///     path — it does **not** reload the WebView.
+    ///   - `CAPBridgeViewController.setServerBasePath(path:)` does the asset-path
+    ///     update **and** reloads the WebView via
+    ///     `webView.load(URLRequest(url: config.serverURL))`.
+    ///
+    /// We must call the view-controller variant (the same one Capacitor's own
+    /// `CAPWebViewPlugin` calls); calling the bridge variant leaves the
+    /// WebView rendering the old (app-bundle) content even though the asset
+    /// handler now points at `current/www/`. `bridge.viewController` is exposed
+    /// on `CAPBridgeProtocol`, and the concrete type is `CAPBridgeViewController`.
+    ///
+    /// Must run on the main thread (WebView/bridge APIs are MainActor), so it
+    /// dispatches internally and resolves on the main thread.
+    ///
+    /// Flow:
+    ///   1. Validate `current/www/index.html` exists (refuse rather than point
+    ///      the WebView at a missing directory).
+    ///   2. `viewController.setServerBasePath(path: current/www/.path)` —
+    ///      re-points the asset handler + reloads the WebView from
+    ///      `capacitor://localhost/`, which now serves `current/www/`.
+    ///   3. Resolve `{ path }` for debugging.
+    /// On any failure: reject and leave the WebView pointing wherever it was
+    /// (app bundle on a fresh install, prior active bundle otherwise). The
+    /// active bundle pointer in `state.json` is never changed here.
+    @objc func reload(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else {
+                call.reject("reload failed: plugin deallocated")
+                return
+            }
+            guard let viewController = self.bridge?.viewController as? CAPBridgeViewController else {
+                call.reject("reload failed: bridge/viewController unavailable")
+                return
+            }
+            let indexURL = self.currentBundleURL.appendingPathComponent("index.html")
+            guard FileManager.default.fileExists(atPath: indexURL.path) else {
+                call.reject(
+                    "reload failed: no active bundle at \(self.currentBundleURL.path)"
+                )
+                return
+            }
+            // Re-point the asset handler at the writable bundle and reload the
+            // WebView. `setServerBasePath(path:)` expects the directory that
+            // contains `index.html` at its root — that is `current/www/`.
+            viewController.setServerBasePath(path: self.currentBundleURL.path)
+            call.resolve(["path": self.currentBundleURL.path])
         }
     }
 
