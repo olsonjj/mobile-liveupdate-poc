@@ -123,7 +123,9 @@ This walkthrough exercises the full update + rollback flow end-to-end on the
 iOS simulator. It mirrors the PRD's definition of done. All commands assume
 you are at the repo root.
 
-![App home screen at build 1](screenshots/app-home.png)
+<p align="center">
+  <img src="screenshots/app-home.png" width="50%" alt="App home screen at build 1" />
+</p>
 
 *The app at its baseline (build 1), showing the build card, greeting, and the
 disabled Roll Back button (no previous bundle yet).*
