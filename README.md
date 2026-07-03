@@ -378,3 +378,7 @@ A step-by-step walkthrough of the full DoD (including the rollback ordering)
 lives in the [Trying it out](#trying-it-out-manual-testing-on-the-ios-simulator)
 section above. See `PRD.md` for the full problem statement, solution, user
 stories, and implementation decisions.
+
+---
+
+*Built using the [Pi](https://pi.dev) coding harness with GLM 5.2.*
