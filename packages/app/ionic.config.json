@@ -1,0 +1,7 @@
+{
+  "name": "@ionic-update-poc/app",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "angular"
+}
