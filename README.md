@@ -24,38 +24,20 @@ simpler, self-hosted alternative to Ionic AppFlow's Live Updates feature.
 
 ## Architecture
 
-```
-┌─────────────────────────────────┐     ┌──────────────────────────────┐
-│  iOS Simulator                  │     │  Host Mac                    │
-│                                 │     │                              │
-│  ┌───────────────────────────┐  │     │  ┌────────────────────────┐  │
-│  │  Capacitor WebView        │  │     │  │  Fastify Server        │  │
-│  │  (Ionic/Angular app)      │  │     │  │  localhost:3000         │  │
-│  │                           │  │     │  │                        │  │
-│  │  Build: 2 / Hello v2     │  │     │  │  GET /api/updates/     │  │
-│  │  [Roll Back]              │  │     │  │    latest              │  │
-│  └──────────┬────────────────┘  │     │  │                        │  │
-│             │                   │     │  │  /api/payloads/        │  │
-│  ┌──────────▼────────────────┐  │     │  │    build-{N}.zip       │  │
-│  │  LiveUpdatePlugin (Swift) │  │     │  └────────────────────────┘  │
-│  │                           │  │     │                              │
-│  │  • checkForUpdate         │◄├─────┤  HTTP (plain)                 │
-│  │  • downloadAndStageUpdate │  │     │                              │
-│  │  • swapToStagedUpdate     │  │     └──────────────────────────────┘
-│  │  • reloadWebView          │  │
-│  │  • rollback               │  │
-│  └──────────┬────────────────┘  │
-│             │                   │
-│  ┌──────────▼────────────────┐  │
-│  │  On-device storage         │  │
-│  │  Library/App Support/      │  │
-│  │    liveupdates/            │  │
-│  │    ├── current/www/        │  │
-│  │    ├── previous/www/       │  │
-│  │    ├── staging/            │  │
-│  │    └── state.json          │  │
-│  └───────────────────────────┘  │
-└─────────────────────────────────┘
+```mermaid
+flowchart LR
+    subgraph sim["iOS Simulator"]
+        webview["Capacitor WebView<br/>Ionic/Angular app<br/><i>Build: 2 / Hello v2</i><br/>[Roll Back]"]
+        plugin["LiveUpdatePlugin (Swift)<br/><br/>• checkForUpdate<br/>• downloadAndStageUpdate<br/>• swapToStagedUpdate<br/>• reloadWebView<br/>• rollback"]
+        storage["On-device storage<br/>Library/App Support/liveupdates/<br/>├── current/www/<br/>├── previous/www/<br/>├── staging/<br/>└── state.json"]
+        webview --> plugin --> storage
+    end
+
+    subgraph mac["Host Mac"]
+        server["Fastify Server<br/>localhost:3000<br/><br/>GET /api/updates/latest<br/>/api/payloads/build-{N}.zip"]
+    end
+
+    plugin <-->|"HTTP (plain)"| server
 ```
 
 **Key design decisions (see `PRD.md` for full rationale):**
