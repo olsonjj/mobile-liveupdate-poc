@@ -1,0 +1,3 @@
+# Exclude generated iOS platform code from GitHub language stats
+# so the repo is correctly identified as TypeScript/Angular
+packages/app/ios/** linguist-vendored
